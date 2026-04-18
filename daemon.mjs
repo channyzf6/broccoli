@@ -333,6 +333,10 @@ function listSessions() {
     lastCallAgoMs: s.lastCallAt ? (now - s.lastCallAt) : null,
     ageMs: now - new Date(s.startedAt).getTime(),
     toolCalls: s.toolCalls,
+    activityState: s.activityState ?? null,
+    toolName: s.toolName ?? null,
+    stateChangedAt: s.stateChangedAt ?? null,
+    stateChangedAgoMs: s.stateChangedAt ? (now - s.stateChangedAt) : null,
   }));
 }
 
@@ -493,8 +497,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       // Preserve any previously-set sessionName, toolCalls, lastCallAt, and
-      // context-usage fields across re-registrations (e.g. daemon restart,
-      // heartbeat re-registration).
+      // tail-state fields across re-registrations (e.g. daemon restart,
+      // heartbeat re-registration). Scanner state lives in the proxy, so on
+      // proxy restart these will refresh on the next /session/activity tick.
       const prev = sessions.get(sessionId);
       sessions.set(sessionId, {
         pid: pid ?? null,
@@ -505,6 +510,9 @@ const server = http.createServer(async (req, res) => {
         lastSeen: Date.now(),
         toolCalls: prev?.toolCalls ?? 0,
         lastCallAt: prev?.lastCallAt ?? null,
+        activityState: prev?.activityState ?? null,
+        toolName: prev?.toolName ?? null,
+        stateChangedAt: prev?.stateChangedAt ?? null,
       });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, registered: sessionId, total: sessions.size }));
@@ -569,9 +577,34 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.lastCallAt === "number" && body.lastCallAt > 0) {
         s.lastCallAt = Math.max(s.lastCallAt || 0, body.lastCallAt);
       }
+      // Tail-state fields (new). activityState transitions freely (no
+      // monotonicity — state is whatever the last JSONL line implies, which
+      // the proxy re-derives authoritatively). stateChangedAt is only
+      // updated forward so a delayed POST can't rewind it.
+      if (
+        body.activityState === "running" ||
+        body.activityState === "thinking" ||
+        body.activityState === "idle"
+      ) {
+        s.activityState = body.activityState;
+      }
+      if (typeof body.toolName === "string") {
+        s.toolName = body.toolName || null;
+      } else if (body.toolName === null) {
+        s.toolName = null;
+      }
+      if (typeof body.stateChangedAt === "number" && body.stateChangedAt > 0) {
+        s.stateChangedAt = Math.max(s.stateChangedAt || 0, body.stateChangedAt);
+      }
       s.lastSeen = Date.now();
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, toolCalls: s.toolCalls, lastCallAt: s.lastCallAt }));
+      res.end(JSON.stringify({
+        ok: true,
+        toolCalls: s.toolCalls,
+        lastCallAt: s.lastCallAt,
+        activityState: s.activityState ?? null,
+        toolName: s.toolName ?? null,
+      }));
       return;
     }
     if (req.method === "POST" && req.url === "/call") {

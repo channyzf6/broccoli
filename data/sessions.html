@@ -224,14 +224,25 @@
   .session .status .dot {
     width: 6px; height: 6px; border-radius: 50%; display: inline-block;
   }
+  .session .status.running,
   .session .status.working {
     background: rgba(74,222,128,.14); color: var(--green);
     border: 1px solid rgba(74,222,128,.35);
   }
+  .session .status.running .dot,
   .session .status.working .dot {
     background: var(--green);
     box-shadow: 0 0 6px rgba(74,222,128,.6);
     animation: statusPulse 1.6s ease-in-out infinite;
+  }
+  .session .status.thinking {
+    background: rgba(192,132,252,.14); color: var(--violet);
+    border: 1px solid rgba(192,132,252,.35);
+  }
+  .session .status.thinking .dot {
+    background: var(--violet);
+    box-shadow: 0 0 6px rgba(192,132,252,.6);
+    animation: statusPulse 2.2s ease-in-out infinite;
   }
   .session .status.idle {
     background: rgba(138,148,173,.10); color: var(--dim);
@@ -344,18 +355,43 @@
     return mr ? `idle ${h}h ${mr}m` : `idle ${h}h`;
   }
 
-  // Derive a session's status from its lastCallAgoMs (with a fallback to
-  // ageMs when the session has made no tool calls yet).
+  // Prettify the raw tool name from the JSONL for display in the pill.
+  //   mcp__web-view__screenshot → web-view·screenshot
+  //   Bash                      → bash
+  function prettifyToolName(raw) {
+    if (!raw) return "";
+    if (raw.startsWith("mcp__")) {
+      const parts = raw.slice(5).split("__");
+      return parts.join("·").toLowerCase();
+    }
+    return raw.toLowerCase();
+  }
+
+  // Derive a session's 3-state activity status from the tail-state fields
+  // reported by the proxy. Legacy sessions (old proxy with no activityState)
+  // fall back to the pre-existing working-if-tool-call-within-60s heuristic
+  // so they still render during rollout.
   function deriveStatus(s) {
-    if (s.lastCallAgoMs == null) {
-      // No tool calls yet — session is idle but we only know "age" not
-      // "idle for how long". Use ageMs as a reasonable approximation.
-      return { kind: "idle", label: fmtIdleDuration(s.ageMs || 0) };
+    if (s.activityState == null) {
+      // Legacy fallback — drop once all proxies are migrated.
+      if (s.lastCallAgoMs != null && s.lastCallAgoMs < WORKING_THRESHOLD_MS) {
+        return { kind: "running", label: "working" };
+      }
+      return { kind: "idle", label: fmtIdleDuration(s.lastCallAgoMs ?? s.ageMs ?? 0) };
     }
-    if (s.lastCallAgoMs < WORKING_THRESHOLD_MS) {
-      return { kind: "working", label: "working" };
+    if (s.activityState === "running") {
+      const t = prettifyToolName(s.toolName);
+      return { kind: "running", label: t ? "running " + t : "running" };
     }
-    return { kind: "idle", label: fmtIdleDuration(s.lastCallAgoMs) };
+    if (s.activityState === "thinking") {
+      return { kind: "thinking", label: "thinking" };
+    }
+    // idle — prefer time since last state change; fall back to lastCallAgoMs
+    // or ageMs for sessions that predate stateChangedAt.
+    const sinceMs = s.stateChangedAgoMs != null
+      ? s.stateChangedAgoMs
+      : (s.lastCallAgoMs ?? s.ageMs ?? 0);
+    return { kind: "idle", label: fmtIdleDuration(sinceMs) };
   }
 
   function buildStatusPill(s) {

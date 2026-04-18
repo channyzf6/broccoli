@@ -220,6 +220,16 @@ let _ownJsonlPath = null;        // resolved on first successful identify
 let _ownJsonlReadBytes = 0;      // byte offset up to which we've parsed
 let _ownJsonlToolCalls = 0;      // running count for this session
 let _ownJsonlLastAt = null;      // epoch ms of the most recent tool_use
+// Tail-state tracking: each JSONL line transitions state deterministically.
+// "running" = last assistant turn ended on a tool_use (stop_reason: "tool_use");
+// "thinking" = last line was user-side (prompt or tool_result), Claude is about
+// to respond; "idle" = last assistant turn ended with end_turn / max_tokens /
+// stop_sequence. Lets the dashboard show "running bash" for long-running tools
+// and "thinking" for text-only responses — strictly better than the old
+// "tool_use within 60s" heuristic.
+let _ownJsonlActivityState = null;   // "running" | "thinking" | "idle" | null
+let _ownJsonlToolName = null;        // last tool_use's name when state === "running"
+let _ownJsonlStateChangedAt = null;  // epoch ms of the line that set the current state
 
 async function identifyOwnJsonl() {
   // Re-run the heuristic every scan rather than committing permanently on
@@ -307,9 +317,18 @@ async function scanOwnJsonlActivity() {
     _ownJsonlReadBytes = 0;
     _ownJsonlToolCalls = 0;
     _ownJsonlLastAt = null;
+    _ownJsonlActivityState = null;
+    _ownJsonlToolName = null;
+    _ownJsonlStateChangedAt = null;
   }
   if (_ownJsonlReadBytes >= st.size) {
-    return { count: _ownJsonlToolCalls, lastAt: _ownJsonlLastAt };
+    return {
+      count: _ownJsonlToolCalls,
+      lastAt: _ownJsonlLastAt,
+      activityState: _ownJsonlActivityState,
+      toolName: _ownJsonlToolName,
+      stateChangedAt: _ownJsonlStateChangedAt,
+    };
   }
   try {
     const fh = await fsp.open(fp, "r");
@@ -321,7 +340,13 @@ async function scanOwnJsonlActivity() {
       if (bytesRead === 0) {
         // File shrank between stat and read, or concurrent truncation. Bail;
         // next scan's truncation branch above will reset state.
-        return { count: _ownJsonlToolCalls, lastAt: _ownJsonlLastAt };
+        return {
+          count: _ownJsonlToolCalls,
+          lastAt: _ownJsonlLastAt,
+          activityState: _ownJsonlActivityState,
+          toolName: _ownJsonlToolName,
+          stateChangedAt: _ownJsonlStateChangedAt,
+        };
       }
       // Only decode the bytes we actually read — avoids stray NULs from the
       // tail of Buffer.alloc on a short read.
@@ -330,27 +355,72 @@ async function scanOwnJsonlActivity() {
       // are reconsidered on the next scan when more bytes have flushed.
       const lastNl = text.lastIndexOf("\n");
       if (lastNl === -1) {
-        return { count: _ownJsonlToolCalls, lastAt: _ownJsonlLastAt };
+        return {
+          count: _ownJsonlToolCalls,
+          lastAt: _ownJsonlLastAt,
+          activityState: _ownJsonlActivityState,
+          toolName: _ownJsonlToolName,
+          stateChangedAt: _ownJsonlStateChangedAt,
+        };
       }
       _ownJsonlReadBytes += lastNl + 1;
       for (const line of text.slice(0, lastNl).split("\n")) {
         if (!line) continue;
-        // Cheap prefilter — assistant tool-use lines contain the substring.
-        if (!line.includes('"tool_use"')) continue;
+        // Type prefilter — we care about user & assistant lines for tail state.
+        // Metadata lines ({type:"permission-mode"}, {type:"summary"}, etc.)
+        // don't transition activity; skipping them keeps the hot path cheap.
+        const isAssistant = line.includes('"type":"assistant"');
+        const isUser = line.includes('"type":"user"');
+        if (!isAssistant && !isUser) continue;
         let obj; try { obj = JSON.parse(line); } catch { continue; }
-        if (obj.type !== "assistant") continue;
-        const content = obj.message?.content;
-        if (!Array.isArray(content)) continue;
-        let calls = 0;
-        for (const c of content) if (c && c.type === "tool_use") calls++;
-        if (calls > 0) {
-          _ownJsonlToolCalls += calls;
-          if (obj.timestamp) _ownJsonlLastAt = Date.parse(obj.timestamp);
+        const ts = obj.timestamp ? Date.parse(obj.timestamp) : null;
+        if (obj.type === "assistant") {
+          const content = obj.message?.content;
+          if (!Array.isArray(content)) continue;
+          // Count tool_use blocks (legacy counter still useful for dashboards).
+          let calls = 0;
+          let lastToolUseName = null;
+          for (const c of content) {
+            if (c && c.type === "tool_use") {
+              calls++;
+              if (c.name) lastToolUseName = c.name;
+            }
+          }
+          if (calls > 0) {
+            _ownJsonlToolCalls += calls;
+            if (ts) _ownJsonlLastAt = ts;
+          }
+          // Tail state: stop_reason authoritative if present; otherwise
+          // infer from whether the last content block is a tool_use.
+          const sr = obj.message?.stop_reason;
+          const endedOnToolUse =
+            sr === "tool_use" ||
+            (!sr && content.length > 0 && content[content.length - 1]?.type === "tool_use");
+          if (endedOnToolUse) {
+            _ownJsonlActivityState = "running";
+            _ownJsonlToolName = lastToolUseName;
+          } else {
+            _ownJsonlActivityState = "idle";
+            _ownJsonlToolName = null;
+          }
+          _ownJsonlStateChangedAt = ts;
+        } else if (obj.type === "user") {
+          // A user line means Claude is either about to respond to a fresh
+          // prompt or processing a tool_result. Either way, "thinking".
+          _ownJsonlActivityState = "thinking";
+          _ownJsonlToolName = null;
+          _ownJsonlStateChangedAt = ts;
         }
       }
     } finally { await fh.close(); }
   } catch { return null; }
-  return { count: _ownJsonlToolCalls, lastAt: _ownJsonlLastAt };
+  return {
+    count: _ownJsonlToolCalls,
+    lastAt: _ownJsonlLastAt,
+    activityState: _ownJsonlActivityState,
+    toolName: _ownJsonlToolName,
+    stateChangedAt: _ownJsonlStateChangedAt,
+  };
 }
 
 function startActivityWatch() {
@@ -361,6 +431,9 @@ function startActivityWatch() {
       sessionId: SESSION_ID,
       toolCalls: a.count,
       lastCallAt: a.lastAt,
+      activityState: a.activityState,
+      toolName: a.toolName,
+      stateChangedAt: a.stateChangedAt,
     }).catch(() => {});
   }, 5000);
   t.unref();
