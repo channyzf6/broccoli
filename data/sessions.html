@@ -224,25 +224,31 @@
   .session .status .dot {
     width: 6px; height: 6px; border-radius: 50%; display: inline-block;
   }
-  .session .status.running,
+  /* "running <tool>.." — tool is dispatched, session is waiting on the tool.
+     Violet conveys "agent is parked until the tool returns". */
+  .session .status.running {
+    background: rgba(192,132,252,.14); color: var(--violet);
+    border: 1px solid rgba(192,132,252,.35);
+  }
+  .session .status.running .dot {
+    background: var(--violet);
+    box-shadow: 0 0 6px rgba(192,132,252,.6);
+    animation: statusPulse 2.2s ease-in-out infinite;
+  }
+  /* "working" — assistant itself is producing output (text / tool-call
+     dispatch / thinking tokens). Green = agent is actively doing work. The
+     legacy `.status.working` fallback for pre-tail-state proxies reuses the
+     same palette — closest semantic match to the old binary pill. */
+  .session .status.thinking,
   .session .status.working {
     background: rgba(74,222,128,.14); color: var(--green);
     border: 1px solid rgba(74,222,128,.35);
   }
-  .session .status.running .dot,
+  .session .status.thinking .dot,
   .session .status.working .dot {
     background: var(--green);
     box-shadow: 0 0 6px rgba(74,222,128,.6);
     animation: statusPulse 1.6s ease-in-out infinite;
-  }
-  .session .status.thinking {
-    background: rgba(192,132,252,.14); color: var(--violet);
-    border: 1px solid rgba(192,132,252,.35);
-  }
-  .session .status.thinking .dot {
-    background: var(--violet);
-    box-shadow: 0 0 6px rgba(192,132,252,.6);
-    animation: statusPulse 2.2s ease-in-out infinite;
   }
   .session .status.idle {
     background: rgba(138,148,173,.10); color: var(--dim);
@@ -381,10 +387,14 @@
     }
     if (s.activityState === "running") {
       const t = prettifyToolName(s.toolName);
-      return { kind: "running", label: t ? "running " + t : "running" };
+      return { kind: "running", label: t ? "running " + t + ".." : "running.." };
     }
     if (s.activityState === "thinking") {
-      return { kind: "thinking", label: "thinking" };
+      // Label reads "working" (more accurate: Claude is actively producing
+      // output — text, thinking tokens, or a tool call about to be dispatched
+      // — we just can't see which from the JSONL until it lands). The CSS
+      // class stays `thinking` so the violet pulsing style still applies.
+      return { kind: "thinking", label: "working" };
     }
     // idle — prefer time since last state change; fall back to lastCallAgoMs
     // or ageMs for sessions that predate stateChangedAt.
