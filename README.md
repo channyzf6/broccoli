@@ -35,37 +35,49 @@ session B ──┘                                                             
 
 ## Install
 
+Heads up: the first `npm install` downloads Chromium via Playwright (~150 MB). Takes 30-60 s; if it looks stuck, it's not — wait it out.
+
+### One-command install
+
+**macOS / Linux**
 ```bash
-cd ~/.claude/extensions/web-view
-npm install
+git clone https://github.com/channyzf6/broccoli web-view && cd web-view && bash bin/install.sh
 ```
 
-`postinstall` pulls Playwright's Chromium build.
+**Windows (PowerShell)**
+```powershell
+git clone https://github.com/channyzf6/broccoli web-view
+cd web-view
+powershell -ExecutionPolicy Bypass -File bin\install.ps1
+```
 
-## Register with Claude Code
+The script runs `npm install`, resolves the absolute path to `index.mjs`, registers the MCP server with Claude Code via `claude mcp add`, and prints a verify step. Restart Claude Code after it finishes, then ask Claude: *"What's the status of the web-view daemon?"* — it should invoke `mcp__web-view__daemon_info` and return a fresh pid.
 
-`~/.claude/settings.json`:
+### Manual install
+
+If the script fails or you prefer to do it by hand:
+
+```bash
+git clone https://github.com/channyzf6/broccoli web-view
+cd web-view
+npm install
+claude mcp add web-view --scope user -- node "$(pwd)/index.mjs"
+```
+
+Or, instead of the CLI, edit `~/.claude/settings.json` directly:
 
 ```json
 {
   "mcpServers": {
     "web-view": {
       "command": "node",
-      "args": ["<path to web-view>/index.mjs"]
+      "args": ["<absolute path to web-view>/index.mjs"]
     }
   }
 }
 ```
 
-On Windows, replace `<path to web-view>` with something like `C:\\Users\\<username>\\.claude\\extensions\\web-view` (note the escaped backslashes). On macOS / Linux, `~/.claude/extensions/web-view` works directly.
-
-Or use the CLI:
-
-```bash
-claude mcp add web-view --scope user -- node "~/.claude/extensions/web-view/index.mjs"
-```
-
-Restart Claude Code. Tools appear as `mcp__web-view__*`.
+On Windows, use something like `C:\\Users\\<username>\\code\\web-view\\index.mjs` (note the escaped backslashes). Restart Claude Code. Tools appear as `mcp__web-view__*`.
 
 ## Multi-session usage
 
