@@ -39,16 +39,23 @@ Heads up: the first `npm install` downloads Chromium via Playwright (~150 MB). T
 
 ### One-command install
 
-**macOS / Linux**
+**macOS / Linux** (also works in **Git Bash** on Windows)
 ```bash
 git clone https://github.com/channyzf6/broccoli web-view && cd web-view && bash bin/install.sh
 ```
 
-**Windows (PowerShell)**
+**Windows PowerShell**
 ```powershell
 git clone https://github.com/channyzf6/broccoli web-view
 cd web-view
 powershell -ExecutionPolicy Bypass -File bin\install.ps1
+```
+
+**Windows cmd.exe** (hands off to PowerShell internally)
+```cmd
+git clone https://github.com/channyzf6/broccoli web-view
+cd web-view
+bin\install.bat
 ```
 
 The script runs `npm install`, resolves the absolute path to `index.mjs`, registers the MCP server with Claude Code via `claude mcp add`, and prints a verify step. Restart Claude Code after it finishes, then ask Claude: *"What's the status of the web-view daemon?"* — it should invoke `mcp__web-view__daemon_info` and return a fresh pid.

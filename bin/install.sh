@@ -5,6 +5,13 @@
 set -eu
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
+# On Git Bash / Cygwin on Windows, `pwd` returns a POSIX path like
+# /c/Users/name/... — node.exe can be finicky with those downstream. If
+# cygpath is available, convert to a native path with forward slashes
+# (C:/Users/name/...), which node.exe resolves reliably.
+if command -v cygpath >/dev/null 2>&1; then
+  here="$(cygpath -m "$here")"
+fi
 index="$here/index.mjs"
 
 echo "[1/3] npm install"
