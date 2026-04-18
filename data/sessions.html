@@ -94,10 +94,25 @@
     background: transparent; color: var(--text); border: none; outline: none;
     padding: .15rem .25rem; border-radius: 4px; min-width: 2ch;
     font-family: inherit;
-    transition: background .4s ease;
+    /* Persistent dotted underline reads as "editable text" without needing
+       hover discovery. Removed while focused so the edit state feels clean. */
+    text-decoration: underline dotted rgba(255,255,255,.22);
+    text-underline-offset: 3px;
+    transition: background .4s ease, text-decoration-color .15s ease;
   }
-  .group-header .name:hover { background: rgba(255,255,255,.05); cursor: text; }
-  .group-header .name:focus { background: rgba(255,255,255,.08); }
+  .group-header .name:hover {
+    background: rgba(255,255,255,.05); cursor: text;
+    text-decoration-color: rgba(255,255,255,.45);
+  }
+  .group-header .name:focus {
+    background: rgba(255,255,255,.08);
+    text-decoration: none;
+  }
+  /* The Ungrouped section's name is a static label, not editable. */
+  .group-header .name.static {
+    text-decoration: none; cursor: default;
+  }
+  .group-header .name.static:hover { background: transparent; }
   /* Brief save/revert feedback flashes on the name after blur. */
   .group-header .name.flash-save { background: rgba(74,222,128,.20); }
   .group-header .name.flash-revert { background: rgba(245,193,58,.20); }
@@ -108,14 +123,6 @@
     font-family: inherit;
   }
   .group-header .count::before { content: "· "; opacity: .6; }
-  /* Edit pencil reveals on hover to signal that the name is editable. */
-  .group-header .edit-hint {
-    font-size: .8rem; color: var(--dim); opacity: 0; cursor: pointer;
-    transition: opacity .15s ease, color .15s ease;
-    user-select: none;
-  }
-  .group-header:hover .edit-hint { opacity: .55; }
-  .group-header .edit-hint:hover { opacity: 1; color: var(--text); }
   .group-header .actions { margin-left: auto; display: flex; gap: .35rem; }
   .group-header .btn {
     background: transparent; border: 1px solid var(--border); color: var(--dim);
@@ -148,9 +155,21 @@
     background: transparent; border: 1px solid var(--border); color: var(--dim);
     font: inherit; font-size: .78rem; padding: .35rem .8rem; border-radius: 6px;
     cursor: pointer; width: auto;
-    transition: color .15s, border-color .15s, background .15s;
+    transition: color .15s, border-color .15s, background .15s, box-shadow .2s;
   }
   .new-group-btn:hover { color: var(--text); border-color: rgba(96,165,250,.5); background: rgba(96,165,250,.04); }
+  /* Primary CTA treatment: promoted when there are no groups yet AND at
+     least one session is live — giving new users one obvious thing to click.
+     Reverts to the ghost style as soon as a group exists. */
+  .new-group-btn.primary {
+    color: #0b1020; background: var(--blue); border-color: var(--blue);
+    font-weight: 600; padding: .45rem 1rem;
+    box-shadow: 0 2px 10px rgba(96,165,250,.25);
+  }
+  .new-group-btn.primary:hover {
+    background: #7db7ff; border-color: #7db7ff; color: #0b1020;
+    box-shadow: 0 2px 14px rgba(96,165,250,.4);
+  }
   /* Empty state: zero sessions AND zero groups. */
   .empty-state {
     text-align: center; padding: 3rem 1rem; color: var(--dim);
@@ -211,6 +230,21 @@
   }
   .session .meta .sep { opacity: .5; flex-shrink: 0; }
   .session .meta .age { flex-shrink: 0; font-family: var(--mono); opacity: .85; }
+  /* Drag-handle grip: surfaces that the card is draggable without requiring
+     the user to try it first. Faint at rest, brightens as the card is
+     hovered so focus stays on the card content until the user reaches for
+     the handle. */
+  .session .meta .drag-handle {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--dim); opacity: .3;
+    font-size: 1rem; line-height: 1;
+    user-select: none;
+    transition: opacity .15s ease, color .15s ease;
+    padding: 0 .1rem;
+    letter-spacing: -.15em;
+  }
+  .session:hover .meta .drag-handle { opacity: .75; color: var(--text); }
   /* Status pill: consistent sentence-case voice for both working and idle
      states so they read as variants of the same concept. */
   .session .status {
@@ -565,6 +599,17 @@
     age.textContent = "up " + fmtAge(s.ageMs);
     meta.append(age);
 
+    // Drag-handle grip — surfaces that the card is draggable without the
+    // user having to try it first. The Unicode chars are two vertical-ellipsis
+    // glyphs side-by-side, which render as a classic 2x3 dot grip across
+    // every reasonable font. Styling lives in .session .meta .drag-handle.
+    const grip = document.createElement("span");
+    grip.className = "drag-handle";
+    grip.textContent = "⋮⋮";
+    grip.title = "drag to move";
+    grip.setAttribute("aria-hidden", "true");
+    meta.append(grip);
+
     li.append(row1, meta);
     li.title = (s.sessionName ? s.sessionName + "\n" : "") + (s.cwd || "") + "\nsession " + (s.id || "");
 
@@ -618,22 +663,6 @@
       setTimeout(() => nameInput.classList.remove("flash-save", "flash-revert"), 700);
     });
     header.append(nameInput);
-
-    // Edit hint: a small pencil that appears on header hover, clicks focus
-    // the name field. Makes the otherwise-hidden "click to rename" visible.
-    const editHint = document.createElement("span");
-    editHint.className = "edit-hint";
-    editHint.textContent = "✎";
-    editHint.title = "rename group";
-    editHint.addEventListener("click", () => {
-      nameInput.focus();
-      const range = document.createRange();
-      range.selectNodeContents(nameInput);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    });
-    header.append(editHint);
 
     // Inline count — no pill background; CSS adds a "· " prefix. Visually
     // distinct from the daemon-level total-sessions pill in the status row.
@@ -815,9 +844,17 @@
       state.append(icon, h, p);
       groupsContainer.append(state);
       newGroupWrap.style.display = "none";
+      newGroupBtn.classList.remove("primary");
       return;
     }
     newGroupWrap.style.display = "";
+    // Promote "+ New group" to a primary CTA when sessions exist but no
+    // groups have been created yet — gives first-time users one clear thing
+    // to click. Reverts to the ghost style once any group exists.
+    newGroupBtn.classList.toggle(
+      "primary",
+      groupsState.length === 0 && sessionsState.length > 0,
+    );
 
     const sig = structuralSignature();
     if (sig === lastStructuralSig && groupsContainer.children.length > 0) {
@@ -866,8 +903,8 @@
       uSection.className = "group-section";
       const uHeader = document.createElement("div"); uHeader.className = "group-header";
       uHeader.style.setProperty("--group-color", "var(--dim)");
-      const uName = document.createElement("span"); uName.className = "name";
-      uName.style.cursor = "default"; uName.textContent = "Ungrouped";
+      const uName = document.createElement("span"); uName.className = "name static";
+      uName.textContent = "Ungrouped";
       uHeader.append(uName);
       const uCount = document.createElement("span"); uCount.className = "count";
       uCount.textContent = String(ungrouped.length);
