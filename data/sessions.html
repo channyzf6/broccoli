@@ -497,6 +497,11 @@
       const liveIds = new Set(sessionsState.map((s) => s.id));
       pinsState = pinsState.filter((p) => liveIds.has(p.sessionId));
     }
+    // Snapshot pre-PUT state so we can roll back the optimistic mutation if
+    // the save fails. Without this, a failed drag's mutation lingers in
+    // memory and bleeds into the next drag's PUT body.
+    const snapshotGroups = JSON.stringify(groupsState);
+    const snapshotPins = JSON.stringify(pinsState);
     let ok = false;
     try {
       const res = await fetch(DAEMON_BASE + "/session-groups", {
@@ -516,9 +521,15 @@
       // Extend the settle window so the next poll gets the server's echo.
       lastWriteAt = Date.now();
     } else {
-      // Let the next poll resync immediately — server state is authoritative,
-      // so our (unsaved) local mutation snaps back rather than diverging.
+      // Roll back to pre-PUT state and let the next poll resync — server is
+      // authoritative, and we don't want a failed drop to persist in memory
+      // where it would get PUT again on the next save.
+      try {
+        groupsState = JSON.parse(snapshotGroups);
+        pinsState = JSON.parse(snapshotPins);
+      } catch {}
       lastWriteAt = 0;
+      render();
     }
   }
 
@@ -981,14 +992,22 @@
   }
 
   function renderOffline() {
+    // Non-destructive: update the daemon chrome to reflect "unreachable" but
+    // leave the group DOM intact so a transient fetch failure mid-drag or
+    // mid-rename doesn't nuke the user's in-progress interaction. The next
+    // successful poll will re-render groups with fresh state.
     dotEl.classList.add("offline");
     countEl.textContent = "daemon unreachable";
     infoEl.textContent = "check 127.0.0.1:8787";
-    groupsContainer.textContent = "";
-    const msg = document.createElement("div");
-    msg.className = "session empty";
-    msg.textContent = "daemon offline — no sessions to report";
-    groupsContainer.append(msg);
+    // Only draw the empty placeholder when we have nothing to show in the
+    // first place (first-load failure). Subsequent offline ticks leave the
+    // last-known groups visible.
+    if (!groupsContainer.children.length) {
+      const msg = document.createElement("div");
+      msg.className = "session empty";
+      msg.textContent = "daemon offline — no sessions to report";
+      groupsContainer.append(msg);
+    }
   }
 
   function isEditingName() {

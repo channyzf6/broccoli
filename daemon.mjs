@@ -60,21 +60,26 @@ async function setWindowSizeUnlocked(page, width, height) {
   // dragging to resize reflows the content. `setViewportSize` would lock it.
   const cdp = await page.context().newCDPSession(page);
   try {
-    const { windowId } = await cdp.send("Browser.getWindowForTarget");
-    // Windows rejects bounds on maximized windows; drop to "normal" first.
+    // Both getWindowForTarget and setWindowBounds can throw on not-yet-
+    // attached targets; treat window sizing as best-effort and never let
+    // it fail the caller.
     try {
+      const { windowId } = await cdp.send("Browser.getWindowForTarget");
+      // Windows rejects bounds on maximized windows; drop to "normal" first.
+      try {
+        await cdp.send("Browser.setWindowBounds", {
+          windowId,
+          bounds: { windowState: "normal" },
+        });
+      } catch {}
       await cdp.send("Browser.setWindowBounds", {
         windowId,
-        bounds: { windowState: "normal" },
+        bounds: {
+          width: Math.max(200, width | 0),
+          height: Math.max(150, height | 0),
+        },
       });
     } catch {}
-    await cdp.send("Browser.setWindowBounds", {
-      windowId,
-      bounds: {
-        width: Math.max(200, width | 0),
-        height: Math.max(150, height | 0),
-      },
-    });
   } finally {
     await cdp.detach().catch(() => {});
   }
@@ -91,6 +96,13 @@ function getPage(name) {
 async function open_webview({ name = "main", url: navUrl, html, title, width, height }) {
   if (!navUrl && !html) throw new Error("Provide either `url` or `html`.");
   await ensureBrowser();
+  // Browser can disconnect between ensureBrowser's return and our next call
+  // (user quits Chromium, OS kills it). Snapshot locally and re-check so we
+  // produce a clear error instead of a bare TypeError on `browser.newContext`.
+  const b = browser;
+  if (!b || !b.isConnected()) {
+    throw new Error("browser disconnected during open_webview; retry");
+  }
 
   let rec = pages.get(name);
   let page;
@@ -103,7 +115,7 @@ async function open_webview({ name = "main", url: navUrl, html, title, width, he
     if (pages.size >= MAX_WEBVIEWS) {
       throw new Error(`webview cap reached (${MAX_WEBVIEWS} open). Close one before opening another.`);
     }
-    const context = await browser.newContext({ viewport: null });
+    const context = await b.newContext({ viewport: null });
     page = await context.newPage();
     rec = { context, page, startedAt: new Date().toISOString() };
     pages.set(name, rec);
@@ -162,7 +174,10 @@ async function close_webview({ name = "main" } = {}) {
   if (!rec) return { closed: false, name, reason: "no such webview" };
   try { if (rec.page && !rec.page.isClosed()) await rec.page.close(); } catch {}
   try { if (rec.context) await rec.context.close(); } catch {}
-  pages.delete(name);
+  // The page.on("close") handler may have already deleted and even re-set
+  // this entry (if open_webview raced the close). Only delete if we still
+  // own the slot.
+  if (pages.get(name) === rec) pages.delete(name);
   return { closed: true, name };
 }
 
@@ -254,23 +269,20 @@ async function open_dashboard({ name }) {
 //     pins:   [ { sessionId, groupId: string | null } ]  // null = Ungrouped
 //   }
 // -----------------------------------------------------------------------------
-let sessionGroupsCache = null;
-
 async function loadSessionGroups() {
-  // Always re-read from disk so hand-edits of session-groups.json (migrations,
-  // debug) are picked up without a daemon restart. File is tiny — cost is
-  // negligible vs. the surprise of stale in-memory data.
+  // Always re-read from disk so hand-edits (migrations, debug) are picked up
+  // without a daemon restart, and so concurrent GET + PUT can't interleave
+  // via a shared in-memory cache. File is tiny; the read cost is negligible.
   try {
     const raw = await fs.readFile(SESSION_GROUPS_PATH, "utf8");
     const parsed = JSON.parse(raw);
-    sessionGroupsCache = {
+    return {
       groups: Array.isArray(parsed.groups) ? parsed.groups : [],
       pins: Array.isArray(parsed.pins) ? parsed.pins : [],
     };
   } catch {
-    sessionGroupsCache = { groups: [], pins: [] };
+    return { groups: [], pins: [] };
   }
-  return sessionGroupsCache;
 }
 
 function validateGroups(data) {
@@ -310,7 +322,7 @@ function validateGroups(data) {
 
 async function saveSessionGroups(data) {
   validateGroups(data);
-  sessionGroupsCache = {
+  const normalized = {
     groups: data.groups.map((g) => ({
       id: g.id,
       name: g.name,
@@ -325,10 +337,11 @@ async function saveSessionGroups(data) {
   // Atomic write: write to a tmp file, then rename over the target. Rename is
   // atomic on both POSIX and NTFS, so a crash mid-write can't leave a
   // half-written or truncated session-groups.json.
-  const json = JSON.stringify(sessionGroupsCache, null, 2);
+  const json = JSON.stringify(normalized, null, 2);
   const tmp = SESSION_GROUPS_PATH + ".tmp";
   await fs.writeFile(tmp, json, "utf8");
   await fs.rename(tmp, SESSION_GROUPS_PATH);
+  return normalized;
 }
 
 // -----------------------------------------------------------------------------
@@ -437,12 +450,14 @@ function requireSessionId(body, res) {
 // Origins to:
 //   - missing header (non-browser clients like the MCP proxy / curl)
 //   - "null" (file:// pages, our own dashboards)
-//   - http://127.0.0.1[:port] / http://localhost[:port] (future self-serve HTML)
+// Localhost HTTP origins (127.0.0.1/localhost) are NOT allowed: any dev
+// server the user happens to run could otherwise POST /call op eval_js
+// at an open webview. The browser would block the response cross-origin,
+// but the side effect would already have landed.
 // Anything else gets a 403 before the request even touches a handler.
 // -----------------------------------------------------------------------------
 function originAllowed(origin) {
-  if (origin == null || origin === "" || origin === "null") return true;
-  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
+  return origin == null || origin === "" || origin === "null";
 }
 
 function writeCORS(res, origin) {
@@ -500,8 +515,9 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: "invalid JSON body" }));
         return;
       }
+      let saved;
       try {
-        await saveSessionGroups(parsed);
+        saved = await saveSessionGroups(parsed);
       } catch (e) {
         // Validation failures are client errors, not server bugs.
         res.writeHead(400, { "content-type": "application/json" });
@@ -511,8 +527,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         ok: true,
-        groups: sessionGroupsCache.groups.length,
-        pins: sessionGroupsCache.pins.length,
+        groups: saved.groups.length,
+        pins: saved.pins.length,
       }));
       return;
     }

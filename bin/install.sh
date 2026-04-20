@@ -28,6 +28,9 @@ if ! command -v claude >/dev/null 2>&1; then
   echo ""
   exit 1
 fi
+# Remove first so re-running the installer (e.g. after moving the clone) is a
+# no-op update rather than a hard failure from duplicate registration.
+claude mcp remove sessions-dashboard --scope user >/dev/null 2>&1 || true
 claude mcp add sessions-dashboard --scope user -- node "$index"
 
 echo ""
