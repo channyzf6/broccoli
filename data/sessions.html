@@ -816,7 +816,13 @@
       g.id, g.name, g.color || "",
       g.members.map((m) => [m.key, m.value]),
     ]);
-    return JSON.stringify([sSig, gSig]);
+    // Pins affect bucketing independently of sessions/groups — dragging an
+    // unnamed session only writes a pin, so without this tuple the sig
+    // stays equal and render() takes the fast path that skips re-bucketing.
+    const pSig = pinsState
+      .map((p) => [p.sessionId, p.groupId === null ? "" : p.groupId])
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return JSON.stringify([sSig, gSig, pSig]);
   }
 
   // Render labeled stats in the daemon info row. Labels in sans-serif, values
@@ -1001,6 +1007,11 @@
         fetch(DAEMON_BASE + "/sessions", { cache: "no-store" }),
         fetch(DAEMON_BASE + "/session-groups", { cache: "no-store" }),
       ]);
+      // A drop could have mutated groupsState/pinsState locally while the
+      // GET was in flight — don't stomp the optimistic state with the
+      // server's pre-drop snapshot. The drop's PUT is already queued and
+      // the next successful poll will reconcile.
+      if (Date.now() - lastWriteAt < TIMINGS.writeSettleMs) return;
       if (!sRes.ok) throw new Error("sessions http " + sRes.status);
       const sData = await sRes.json();
       sessionsState = sData.sessions || [];
