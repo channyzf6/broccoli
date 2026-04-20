@@ -543,50 +543,36 @@
     const mk = matchKeyForSession(session);
     if (!mk) return false; // no stable identifier — can't persist
 
-    // Drag-to-Ungrouped (targetGroupId == null) expresses explicit "un-pin
-    // from all groups" intent. In that case we strip every rule that
-    // matches this session, even cohort-shared cwd rules. A named drag to
-    // Ungrouped would otherwise leave the cwd rule intact and the two-pass
-    // bucketing would snap the session right back into the cohort's group
-    // via the cwd fallback. Side effect: cohort-mates also lose that rule
-    // and fall to Ungrouped — acceptable given the user is explicitly
-    // pulling someone out of a cohort with no per-session identifier.
-    const aggressive = !targetGroupId;
-
     let changed = false;
     for (const g of groupsState) {
       const keep = [];
       for (const m of g.members) {
         if (!memberMatchesSession(m, session)) { keep.push(m); continue; }
         if (m.key === "sessionName") {
-          // Session-specific rule — always safe to drop.
+          // Session-specific. Drop.
           changed = true;
         } else if (m.key === "cwd") {
-          // Cohort-shared rule. Preserve only for regular drags (moving
-          // into another named group); un-pin aggressively when the user
-          // drags to Ungrouped.
+          // Potentially a cohort rule. Only drop if no other currently-
+          // connected session depends on it.
           //
           // Invariant: sessionsState reflects the most recent successful
           // poll. On poll failure we preserve the previous state (see
           // poll() — it only assigns to sessionsState on success), so this
           // check never false-orphans a cwd rule because of a transient
           // network blip.
-          if (aggressive) {
-            changed = true;
-          } else {
-            // Known edge case: if the session being dragged to a named
-            // group is UNNAMED and part of a cwd cohort, we preserve the
-            // cohort rule — but the target group also receives a cwd
-            // rule, so the session matches both and the cwd-pass in
-            // bucketing picks whichever group comes first. Drag may
-            // appear to fail. Workaround: /rename first so the target
-            // gets a sessionName-scoped rule that wins in bucketing.
-            const affectsCohort = sessionsState.some(
-              (other) => other.id !== session.id && memberMatchesSession(m, other),
-            );
-            if (affectsCohort) keep.push(m);
-            else changed = true;
-          }
+          //
+          // Known edge case: if the session being dragged is UNNAMED and
+          // is itself part of a cwd cohort, this rule gets preserved for
+          // the cohort — but the target group also receives a cwd rule,
+          // so the session now matches both groups and the bucketing's
+          // first-group-wins-for-cwd picks whichever comes first. Drag may
+          // appear to fail. Workaround: /rename the session first so the
+          // drag creates a sessionName-scoped rule instead.
+          const affectsCohort = sessionsState.some(
+            (other) => other.id !== session.id && memberMatchesSession(m, other),
+          );
+          if (affectsCohort) keep.push(m);
+          else changed = true;
         }
       }
       if (keep.length !== g.members.length) g.members = keep;
