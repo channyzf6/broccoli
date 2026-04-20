@@ -477,14 +477,6 @@
     return false;
   }
 
-  // A session matches a group if ANY member rule matches it.
-  function sessionMatchesGroup(session, group) {
-    for (const m of group.members || []) {
-      if (memberMatchesSession(m, session)) return true;
-    }
-    return false;
-  }
-
   // Pick the match key + value for a session when dragging it into a group.
   // Prefer sessionName (more specific) when set, else cwd.
   function matchKeyForSession(session) {
@@ -562,6 +554,20 @@
         } else if (m.key === "cwd") {
           // Potentially a cohort rule. Only drop if no other currently-
           // connected session depends on it.
+          //
+          // Invariant: sessionsState reflects the most recent successful
+          // poll. On poll failure we preserve the previous state (see
+          // poll() — it only assigns to sessionsState on success), so this
+          // check never false-orphans a cwd rule because of a transient
+          // network blip.
+          //
+          // Known edge case: if the session being dragged is UNNAMED and
+          // is itself part of a cwd cohort, this rule gets preserved for
+          // the cohort — but the target group also receives a cwd rule,
+          // so the session now matches both groups and the bucketing's
+          // first-group-wins-for-cwd picks whichever comes first. Drag may
+          // appear to fail. Workaround: /rename the session first so the
+          // drag creates a sessionName-scoped rule instead.
           const affectsCohort = sessionsState.some(
             (other) => other.id !== session.id && memberMatchesSession(m, other),
           );
