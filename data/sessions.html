@@ -344,6 +344,10 @@
   // Local copies of the latest daemon state.
   let sessionsState = [];
   let groupsState = [];
+  // Per-session-id overrides of group-rule matching. A pin wins over members
+  // rules — it's how we pick one session out of a cohort that shares a cwd.
+  // Shape: [{ sessionId, groupId: string | null }] where null = Ungrouped.
+  let pinsState = [];
   let daemonState = null;
 
   // Suppress re-render while the user is mid-drag so DOM churn doesn't
@@ -470,21 +474,6 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  // Does a single member rule match a given session?
-  function memberMatchesSession(m, session) {
-    if (m.key === "cwd" && session.cwd && m.value === session.cwd) return true;
-    if (m.key === "sessionName" && session.sessionName && m.value === session.sessionName) return true;
-    return false;
-  }
-
-  // Pick the match key + value for a session when dragging it into a group.
-  // Prefer sessionName (more specific) when set, else cwd.
-  function matchKeyForSession(session) {
-    if (session.sessionName) return { key: "sessionName", value: session.sessionName };
-    if (session.cwd) return { key: "cwd", value: session.cwd };
-    return null;
-  }
-
   // Serialize PUTs to /session-groups so two rapid drags can't race each
   // other on the network. Each call appends to a chain; the chain's tail
   // holds the last-submitted snapshot as the authoritative write.
@@ -500,12 +489,20 @@
     // Suppress polls while the PUT is in flight so stale server state can't
     // overwrite our optimistic local mutation mid-request.
     lastWriteAt = Date.now();
+    // Garbage-collect pins whose session is no longer connected. We only
+    // prune when sessionsState is non-empty so a transient empty-sessions
+    // read (e.g. daemon restart) doesn't nuke all pins. Pins for the live
+    // set stay; stale ones are dropped to bound the file size.
+    if (sessionsState.length > 0) {
+      const liveIds = new Set(sessionsState.map((s) => s.id));
+      pinsState = pinsState.filter((p) => liveIds.has(p.sessionId));
+    }
     let ok = false;
     try {
       const res = await fetch(DAEMON_BASE + "/session-groups", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ groups: groupsState }),
+        body: JSON.stringify({ groups: groupsState, pins: pinsState }),
       });
       ok = res.ok;
       if (!ok) {
@@ -528,64 +525,71 @@
   // Move a session into the target group (or to Ungrouped when targetGroupId
   // is null). Returns true if anything changed.
   //
-  // Removing rules that match this session is nuanced:
-  //   - sessionName-based rules are uniquely tied to one session (names are
-  //     per-session), so always safe to remove.
-  //   - cwd-based rules can apply to a cohort of sessions sharing a repo.
-  //     Removing a cwd rule that other currently-connected sessions also
-  //     match would silently kick those unrelated cohort-mates out of their
-  //     group. Preserve cwd rules that have active cohort dependents.
+  // Drag writes a per-session-id pin rather than mutating cwd member rules.
+  // Pins override rule-based matching, which cleanly solves the "cwd rule
+  // can't distinguish sessions sharing a cwd" problem that member-mutation
+  // approaches kept tripping on. cwd rules stay intact so unaffected cohort
+  // mates don't get kicked out of their group.
   //
-  // This still fixes the stale-rule bug (session grouped by cwd before being
-  // renamed can now be dragged out) because in that case there's no other
-  // session matching the cwd rule, so removal is safe.
+  // Pins are keyed on session.id (daemon-assigned, stable for the session's
+  // registered lifetime). On next launch the id is new and the pin no longer
+  // applies — the session falls through to rule-based matching.
+  //
+  // For NAMED sessions we additionally sync a sessionName rule so grouping
+  // survives CC restarts (pin gone, rule still matches). sessionName is
+  // session-specific so these rules never cause cohort contamination.
   function assignSessionToGroup(session, targetGroupId) {
-    const mk = matchKeyForSession(session);
-    if (!mk) return false; // no stable identifier — can't persist
-
+    if (!session || !session.id) return false;
+    const desiredGroupId = targetGroupId || null;
     let changed = false;
-    for (const g of groupsState) {
-      const keep = [];
-      for (const m of g.members) {
-        if (!memberMatchesSession(m, session)) { keep.push(m); continue; }
-        if (m.key === "sessionName") {
-          // Session-specific. Drop.
+
+    // Upsert the pin.
+    const existing = pinsState.find((p) => p.sessionId === session.id);
+    if (!existing || existing.groupId !== desiredGroupId) {
+      pinsState = pinsState.filter((p) => p.sessionId !== session.id);
+      pinsState.push({ sessionId: session.id, groupId: desiredGroupId });
+      changed = true;
+    }
+
+    // Sync sessionName rule so the grouping persists across CC restarts.
+    // Goal: the rule for this sessionName exists only in the target group
+    // (or in no group, if target is Ungrouped).
+    if (session.sessionName) {
+      const name = session.sessionName;
+      for (const g of groupsState) {
+        const shouldKeep = g.id === desiredGroupId;
+        const hasRule = g.members.some((m) => m.key === "sessionName" && m.value === name);
+        if (shouldKeep && !hasRule) {
+          g.members.push({ key: "sessionName", value: name });
           changed = true;
-        } else if (m.key === "cwd") {
-          // Potentially a cohort rule. Only drop if no other currently-
-          // connected session depends on it.
-          //
-          // Invariant: sessionsState reflects the most recent successful
-          // poll. On poll failure we preserve the previous state (see
-          // poll() — it only assigns to sessionsState on success), so this
-          // check never false-orphans a cwd rule because of a transient
-          // network blip.
-          //
-          // Known edge case: if the session being dragged is UNNAMED and
-          // is itself part of a cwd cohort, this rule gets preserved for
-          // the cohort — but the target group also receives a cwd rule,
-          // so the session now matches both groups and the bucketing's
-          // first-group-wins-for-cwd picks whichever comes first. Drag may
-          // appear to fail. Workaround: /rename the session first so the
-          // drag creates a sessionName-scoped rule instead.
-          const affectsCohort = sessionsState.some(
-            (other) => other.id !== session.id && memberMatchesSession(m, other),
-          );
-          if (affectsCohort) keep.push(m);
-          else changed = true;
+        } else if (!shouldKeep && hasRule) {
+          g.members = g.members.filter((m) => !(m.key === "sessionName" && m.value === name));
+          changed = true;
         }
       }
-      if (keep.length !== g.members.length) g.members = keep;
     }
-    if (targetGroupId) {
-      const g = groupsState.find((x) => x.id === targetGroupId);
-      if (g) {
-        // Dedupe: don't add the exact same rule twice.
-        const already = g.members.some((m) => m.key === mk.key && m.value === mk.value);
-        if (!already) { g.members.push({ key: mk.key, value: mk.value }); changed = true; }
+
+    return changed;
+  }
+
+  // Where a session would be bucketed by member rules alone (no pins).
+  // sessionName rules (specific) win over cwd rules (cohort-shared).
+  function resolveRuleGroupId(session) {
+    if (session.sessionName) {
+      for (const g of groupsState) {
+        for (const m of g.members || []) {
+          if (m.key === "sessionName" && m.value === session.sessionName) return g.id;
+        }
       }
     }
-    return changed;
+    if (session.cwd) {
+      for (const g of groupsState) {
+        for (const m of g.members || []) {
+          if (m.key === "cwd" && m.value === session.cwd) return g.id;
+        }
+      }
+    }
+    return null;
   }
 
   function renderSessionCard(s) {
@@ -733,6 +737,10 @@
       }
       armedGroupIds.delete(group.id);
       groupsState = groupsState.filter((g) => g.id !== group.id);
+      // Drop pins that target the deleted group so sessions fall back to
+      // their rule-based assignment (or Ungrouped) rather than getting
+      // stuck on a dangling reference.
+      pinsState = pinsState.filter((p) => p.groupId !== group.id);
       saveGroups();
       render();
     });
@@ -905,28 +913,31 @@
     // Ensure each group has a color (assign from palette when missing).
     groupsState.forEach((g, i) => { if (!g.color) g.color = COLORS[i % COLORS.length]; });
 
-    // Bucket sessions into groups. Matching is two-pass: sessionName rules
-    // (specific) win over cwd rules (potentially cohort-shared), regardless
-    // of group order. This lets a user drag one named session out of a
-    // cohort into a new group without disturbing the unnamed cohort-mates:
-    // the new {sessionName: X} rule takes precedence over the remaining
-    // {cwd: Y} cohort rule even if the cohort group comes first in order.
+    // Bucket sessions into groups. Resolution order per session:
+    //   1. Pin — a per-session-id override written by drag-and-drop. Wins
+    //      over rules so users can move one session out of a shared-cwd
+    //      cohort (or force it to Ungrouped) without kicking its mates.
+    //   2. sessionName rule — specific and stable across CC restarts.
+    //   3. cwd rule — cohort-wide; fallback when no more-specific match.
+    // Pins pointing at a deleted group fall through to rules (defensive;
+    // normally group delete also strips its pins).
     const bucket = new Map();
     for (const g of groupsState) bucket.set(g.id, []);
     const ungrouped = [];
-    const groupMatchingMember = (s, keyPref) => {
-      for (const g of groupsState) {
-        for (const m of g.members || []) {
-          if (m.key === keyPref && memberMatchesSession(m, s)) return g;
-        }
-      }
-      return null;
-    };
+    const pinBySessionId = new Map();
+    for (const p of pinsState) pinBySessionId.set(p.sessionId, p.groupId);
+    const groupIds = new Set(groupsState.map((g) => g.id));
     for (const s of sessionsState) {
-      const g = (s.sessionName && groupMatchingMember(s, "sessionName"))
-             || (s.cwd && groupMatchingMember(s, "cwd"))
-             || null;
-      if (g) bucket.get(g.id).push(s);
+      let destId;
+      if (pinBySessionId.has(s.id)) {
+        const pinned = pinBySessionId.get(s.id);
+        if (pinned === null) destId = null;         // forced Ungrouped
+        else if (groupIds.has(pinned)) destId = pinned;
+        else destId = resolveRuleGroupId(s);        // stale pin, fall back
+      } else {
+        destId = resolveRuleGroupId(s);
+      }
+      if (destId && bucket.has(destId)) bucket.get(destId).push(s);
       else ungrouped.push(s);
     }
 
@@ -997,6 +1008,7 @@
       if (gRes.ok) {
         const gData = await gRes.json();
         groupsState = Array.isArray(gData.groups) ? gData.groups : [];
+        pinsState = Array.isArray(gData.pins) ? gData.pins : [];
       }
       lastPollOkAt = Date.now();
       render();

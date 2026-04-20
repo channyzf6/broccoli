@@ -238,12 +238,21 @@ async function open_dashboard({ name }) {
 
 // -----------------------------------------------------------------------------
 // Session groups (data/session-groups.json). Dashboards use this to organize
-// connected sessions into user-defined workstreams. Groups match sessions by
-// cwd or sessionName — stable identifiers that survive CC restarts, unlike
-// sessionId which is regenerated each launch.
+// connected sessions into user-defined workstreams.
+//
+// Two mechanisms:
+//   - members (per group): cwd/sessionName rules that match sessions into a
+//     group. Survive CC restarts because cwd/sessionName are stable.
+//   - pins (top-level): per-session-id overrides that win over rules.
+//     Scoped to the daemon-assigned session lifetime (new id on restart).
+//     Needed to disambiguate sessions that share a cwd — the only case where
+//     rule-based matching can't pick one session out of a cohort.
 //
 // Shape:
-//   { groups: [ { id, name, color, members: [{ key: "cwd"|"sessionName", value }] } ] }
+//   {
+//     groups: [ { id, name, color, members: [{ key: "cwd"|"sessionName", value }] } ],
+//     pins:   [ { sessionId, groupId: string | null } ]  // null = Ungrouped
+//   }
 // -----------------------------------------------------------------------------
 let sessionGroupsCache = null;
 
@@ -256,9 +265,10 @@ async function loadSessionGroups() {
     const parsed = JSON.parse(raw);
     sessionGroupsCache = {
       groups: Array.isArray(parsed.groups) ? parsed.groups : [],
+      pins: Array.isArray(parsed.pins) ? parsed.pins : [],
     };
   } catch {
-    sessionGroupsCache = { groups: [] };
+    sessionGroupsCache = { groups: [], pins: [] };
   }
   return sessionGroupsCache;
 }
@@ -281,6 +291,21 @@ function validateGroups(data) {
       }
     }
   }
+  if (data.pins !== undefined) {
+    if (!Array.isArray(data.pins)) throw new Error("pins must be an array");
+    const groupIds = new Set(data.groups.map((g) => g.id));
+    for (const p of data.pins) {
+      if (!p || typeof p.sessionId !== "string" || !p.sessionId) {
+        throw new Error("pin requires non-empty sessionId");
+      }
+      if (p.groupId !== null && (typeof p.groupId !== "string" || !p.groupId)) {
+        throw new Error("pin groupId must be null or non-empty string");
+      }
+      if (p.groupId !== null && !groupIds.has(p.groupId)) {
+        throw new Error(`pin references unknown groupId "${p.groupId}"`);
+      }
+    }
+  }
 }
 
 async function saveSessionGroups(data) {
@@ -291,6 +316,10 @@ async function saveSessionGroups(data) {
       name: g.name,
       color: g.color || null,
       members: g.members.map((m) => ({ key: m.key, value: m.value })),
+    })),
+    pins: (data.pins || []).map((p) => ({
+      sessionId: p.sessionId,
+      groupId: p.groupId === null ? null : p.groupId,
     })),
   };
   // Atomic write: write to a tmp file, then rename over the target. Rename is
@@ -480,7 +509,11 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, groups: sessionGroupsCache.groups.length }));
+      res.end(JSON.stringify({
+        ok: true,
+        groups: sessionGroupsCache.groups.length,
+        pins: sessionGroupsCache.pins.length,
+      }));
       return;
     }
     if (req.method === "POST" && req.url === "/session/register") {
