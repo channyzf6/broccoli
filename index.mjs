@@ -280,7 +280,8 @@ async function resolveOwnJsonlPath() {
 // directly so their polls don't interfere with the scanner's state.
 async function identifyOwnJsonl() {
   const pick = await resolveOwnJsonlPath();
-  if (pick && pick !== _ownJsonlPath) {
+  if (!pick) return _ownJsonlPath; // resolver couldn't find a candidate
+  if (pick !== _ownJsonlPath) {
     // Chosen JSONL changed — reset ALL scan state for the new file so stale
     // counters or tail-state from the old file don't leak through.
     _ownJsonlPath = pick;
@@ -290,8 +291,6 @@ async function identifyOwnJsonl() {
     _ownJsonlActivityState = null;
     _ownJsonlToolName = null;
     _ownJsonlStateChangedAt = null;
-  } else if (pick) {
-    _ownJsonlPath = pick;
   }
   return _ownJsonlPath;
 }
