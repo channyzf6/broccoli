@@ -574,6 +574,13 @@
           if (aggressive) {
             changed = true;
           } else {
+            // Known edge case: if the session being dragged to a named
+            // group is UNNAMED and part of a cwd cohort, we preserve the
+            // cohort rule — but the target group also receives a cwd
+            // rule, so the session matches both and the cwd-pass in
+            // bucketing picks whichever group comes first. Drag may
+            // appear to fail. Workaround: /rename first so the target
+            // gets a sessionName-scoped rule that wins in bucketing.
             const affectsCohort = sessionsState.some(
               (other) => other.id !== session.id && memberMatchesSession(m, other),
             );
