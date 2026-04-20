@@ -365,6 +365,13 @@
   // Timestamp of the most recent successful poll — drives the "synced Xs ago"
   // staleness indicator so users can tell the dashboard is live.
   let lastPollOkAt = 0;
+  // Last server-confirmed snapshots (JSON strings) for rollback on save
+  // failure. Updated on every successful poll and every successful PUT ack.
+  // A failed PUT restores groupsState/pinsState from these — we can't use
+  // a local snapshot taken inside doSaveGroups because by that point the
+  // caller has already applied the optimistic mutation.
+  let lastSyncedGroups = "[]";
+  let lastSyncedPins = "[]";
   // Delete buttons are armed per-group (two-click confirm). Tracking the
   // armed set at module scope rather than via per-button closures means
   // re-renders (e.g. after a drop) don't orphan pending timers.
@@ -497,17 +504,18 @@
       const liveIds = new Set(sessionsState.map((s) => s.id));
       pinsState = pinsState.filter((p) => liveIds.has(p.sessionId));
     }
-    // Snapshot pre-PUT state so we can roll back the optimistic mutation if
-    // the save fails. Without this, a failed drag's mutation lingers in
-    // memory and bleeds into the next drag's PUT body.
-    const snapshotGroups = JSON.stringify(groupsState);
-    const snapshotPins = JSON.stringify(pinsState);
+    // Capture the payload we're about to send so we can mark lastSynced to
+    // exactly what the server accepted (current in-memory state may drift
+    // further by the time the PUT completes if more mutations queue behind
+    // us on saveChain).
+    const sendGroups = JSON.stringify(groupsState);
+    const sendPins = JSON.stringify(pinsState);
     let ok = false;
     try {
       const res = await fetch(DAEMON_BASE + "/session-groups", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ groups: groupsState, pins: pinsState }),
+        body: `{"groups":${sendGroups},"pins":${sendPins}}`,
       });
       ok = res.ok;
       if (!ok) {
@@ -520,13 +528,14 @@
     if (ok) {
       // Extend the settle window so the next poll gets the server's echo.
       lastWriteAt = Date.now();
+      lastSyncedGroups = sendGroups;
+      lastSyncedPins = sendPins;
     } else {
-      // Roll back to pre-PUT state and let the next poll resync — server is
-      // authoritative, and we don't want a failed drop to persist in memory
-      // where it would get PUT again on the next save.
+      // Roll back to the last server-confirmed state so the failed
+      // optimistic mutation doesn't linger and re-PUT on the next save.
       try {
-        groupsState = JSON.parse(snapshotGroups);
-        pinsState = JSON.parse(snapshotPins);
+        groupsState = JSON.parse(lastSyncedGroups);
+        pinsState = JSON.parse(lastSyncedPins);
       } catch {}
       lastWriteAt = 0;
       render();
@@ -1039,6 +1048,10 @@
         const gData = await gRes.json();
         groupsState = Array.isArray(gData.groups) ? gData.groups : [];
         pinsState = Array.isArray(gData.pins) ? gData.pins : [];
+        // Keep the rollback baseline aligned with the server's authoritative
+        // view — any subsequent save failure will restore to this snapshot.
+        lastSyncedGroups = JSON.stringify(groupsState);
+        lastSyncedPins = JSON.stringify(pinsState);
       }
       lastPollOkAt = Date.now();
       render();
