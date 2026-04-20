@@ -129,42 +129,43 @@ function httpPost(path, body, { timeoutMs = 3000 } = {}) {
 const _nameCache = new Map(); // filepath -> { mtimeMs, latest: {name, ts} | null }
 const _NAME_CACHE_CAP = 32;
 
+// Tri-state return so the watcher can distinguish:
+//   - string: found a /rename → adopt this name.
+//   - null:   read succeeded AND no /rename present → clear any stale name.
+//   - undefined: I/O error OR JSONL not yet resolvable → leave state alone
+//                so a transient hiccup doesn't flicker-clear a valid name.
 async function discoverSessionName() {
-  try {
-    const fp = await identifyOwnJsonl();
-    if (!fp) return null;
-    let st;
-    try { st = await fsp.stat(fp); } catch { return null; }
-    let entry = _nameCache.get(fp);
-    if (!entry || entry.mtimeMs !== st.mtimeMs) {
-      let localBest = null;
-      let content;
-      try { content = await fsp.readFile(fp, "utf8"); } catch { return null; }
-      for (const line of content.split(/\r?\n/)) {
-        if (!line.includes("/rename")) continue;
-        let obj; try { obj = JSON.parse(line); } catch { continue; }
-        const c = String(obj?.content ?? "");
-        const m = c.match(/<command-name>\/rename<\/command-name>[\s\S]*?<command-args>([^<]*)<\/command-args>/);
-        if (!m) continue;
-        const argName = m[1].trim();
-        if (!argName) continue;
-        const ts = obj.timestamp ? Date.parse(obj.timestamp) : 0;
-        if (!localBest || ts >= localBest.ts) localBest = { name: argName, ts };
-      }
-      entry = { mtimeMs: st.mtimeMs, latest: localBest };
-      _nameCache.set(fp, entry);
+  const fp = await resolveOwnJsonlPath();
+  if (!fp) return undefined; // JSONL not ready yet — don't touch state
+  let st;
+  try { st = await fsp.stat(fp); } catch { return undefined; }
+  let entry = _nameCache.get(fp);
+  if (!entry || entry.mtimeMs !== st.mtimeMs) {
+    let content;
+    try { content = await fsp.readFile(fp, "utf8"); } catch { return undefined; }
+    let localBest = null;
+    for (const line of content.split(/\r?\n/)) {
+      if (!line.includes("/rename")) continue;
+      let obj; try { obj = JSON.parse(line); } catch { continue; }
+      const c = String(obj?.content ?? "");
+      const m = c.match(/<command-name>\/rename<\/command-name>[\s\S]*?<command-args>([^<]*)<\/command-args>/);
+      if (!m) continue;
+      const argName = m[1].trim();
+      if (!argName) continue;
+      const ts = obj.timestamp ? Date.parse(obj.timestamp) : 0;
+      if (!localBest || ts >= localBest.ts) localBest = { name: argName, ts };
     }
-    // Cap cache size (LRU-ish via Map insertion order) — since we only ever
-    // cache one file per session, this effectively caps to the number of
-    // distinct JSONLs this proxy has ever seen identifyOwnJsonl resolve to.
-    while (_nameCache.size > _NAME_CACHE_CAP) {
-      const oldest = _nameCache.keys().next().value;
-      _nameCache.delete(oldest);
-    }
-    return entry.latest ? entry.latest.name : null;
-  } catch {
-    return null;
+    entry = { mtimeMs: st.mtimeMs, latest: localBest };
+    _nameCache.set(fp, entry);
   }
+  // Cap cache size (LRU-ish via Map insertion order). Each proxy typically
+  // only ever caches one path; the cap just guards against drift across rare
+  // path flips.
+  while (_nameCache.size > _NAME_CACHE_CAP) {
+    const oldest = _nameCache.keys().next().value;
+    _nameCache.delete(oldest);
+  }
+  return entry.latest ? entry.latest.name : null;
 }
 
 // Periodic watcher: picks up /rename commands issued mid-session and pushes
@@ -174,15 +175,17 @@ function startNameWatch() {
   const t = setInterval(async () => {
     if (SESSION_NAME_SOURCE === "manual" || SESSION_NAME_SOURCE === "env") return;
     const d = await discoverSessionName();
-    if (d && d !== SESSION_NAME) {
+    if (d === undefined) return; // transient I/O error — leave state alone
+    if (typeof d === "string" && d !== SESSION_NAME) {
       SESSION_NAME = d;
       SESSION_NAME_SOURCE = "auto";
       httpPost("/session/rename", { sessionId: SESSION_ID, sessionName: d }).catch(() => {});
-    } else if (d == null && SESSION_NAME_SOURCE === "auto" && SESSION_NAME) {
-      // Our own JSONL has no /rename but we had auto-set a name previously
-      // (e.g. from an earlier buggy version that cross-contaminated from a
-      // sibling session's JSONL). Clear the stale name so the dashboard
-      // reflects reality.
+    } else if (d === null && SESSION_NAME_SOURCE === "auto" && SESSION_NAME) {
+      // Our own JSONL was read successfully and contains no /rename, but we
+      // had auto-set a name previously (e.g. from an earlier buggy version
+      // that cross-contaminated from a sibling session's JSONL). Clear so
+      // the dashboard reflects reality. The === null check (vs. falsy) is
+      // load-bearing — undefined above means I/O error, not empty file.
       SESSION_NAME = null;
       SESSION_NAME_SOURCE = null;
       httpPost("/session/rename", { sessionId: SESSION_ID, sessionName: null }).catch(() => {});
@@ -221,25 +224,24 @@ let _ownJsonlActivityState = null;   // "running" | "thinking" | "idle" | null
 let _ownJsonlToolName = null;        // last tool_use's name when state === "running"
 let _ownJsonlStateChangedAt = null;  // epoch ms of the line that set the current state
 
-async function identifyOwnJsonl() {
-  // Re-run the heuristic every scan rather than committing permanently on
-  // first success. If CC's JSONL didn't exist yet when we first looked, or
-  // a different candidate's first-line happened to land closer to our
-  // SESSION_STARTED before ours did, we'd otherwise be stuck on the wrong
-  // file forever. When the best candidate changes, scanner state is reset.
+// Pure path resolver — no shared state mutation. Callable from any watcher
+// without perturbing the activity scanner's incremental read state.
+//
+// Heuristic: pick the JSONL in the cwd's project dir whose first-entry
+// timestamp is closest to SESSION_STARTED. If no candidate is within 30 s,
+// fall back to the most-recently-modified JSONL (handles CC auto-restarts
+// where our proxy's SESSION_STARTED is much later than CC's session start).
+// Returns a path string, or null if no viable candidate.
+async function resolveOwnJsonlPath() {
   const home = process.env.USERPROFILE || process.env.HOME;
-  if (!home) return _ownJsonlPath;
+  if (!home) return null;
   const encoded = SESSION_CWD.replace(/[:\\/_]/g, "-");
   const dir = path.join(home, ".claude", "projects", encoded);
   let entries;
-  try { entries = await fsp.readdir(dir); } catch { return _ownJsonlPath; }
+  try { entries = await fsp.readdir(dir); } catch { return null; }
   const sessionStart = Date.parse(SESSION_STARTED);
   let best = null;
   let bestDelta = Infinity;
-  // Fallback: the JSONL with the newest mtime among those still being
-  // written to. Used when no first-line timestamp is close enough — e.g.
-  // when CC auto-restarted the MCP server mid-session, so our proxy start
-  // is much later than the CC session's actual start.
   let fallback = null;
   let fallbackMtime = 0;
   for (const f of entries) {
@@ -247,14 +249,8 @@ async function identifyOwnJsonl() {
     const fp = path.join(dir, f);
     let st;
     try { st = await fsp.stat(fp); } catch { continue; }
-    // Must have been modified at or after our session started; otherwise it's
-    // an older session's log, not ours.
     if (st.mtimeMs < sessionStart - 2000) continue;
     if (st.mtimeMs > fallbackMtime) { fallbackMtime = st.mtimeMs; fallback = fp; }
-    // Peek the head of the file to find the first line with a `timestamp`.
-    // CC now writes some untimestamped metadata lines at the top
-    // (e.g. {"type":"permission-mode",...}), so "first line" isn't always
-    // the first user/assistant event.
     let firstTs = 0;
     try {
       const fh = await fsp.open(fp, "r");
@@ -275,17 +271,27 @@ async function identifyOwnJsonl() {
     const delta = Math.abs(firstTs - sessionStart);
     if (delta < bestDelta) { bestDelta = delta; best = fp; }
   }
-  const pick = (best && bestDelta < 30000) ? best : fallback;
-  if (pick) {
-    if (pick !== _ownJsonlPath) {
-      // Chosen JSONL changed — reset scanner state so we re-count against
-      // the new file from scratch.
-      _ownJsonlPath = pick;
-      _ownJsonlReadBytes = 0;
-      _ownJsonlToolCalls = 0;
-      _ownJsonlLastAt = null;
-    }
-    return pick;
+  return (best && bestDelta < 30000) ? best : fallback;
+}
+
+// Activity-scanner wrapper around resolveOwnJsonlPath: maintains the
+// read-position cursor and tail-state vars. Only the activity scanner should
+// call this — other callers (e.g. discoverSessionName) use resolveOwnJsonlPath
+// directly so their polls don't interfere with the scanner's state.
+async function identifyOwnJsonl() {
+  const pick = await resolveOwnJsonlPath();
+  if (pick && pick !== _ownJsonlPath) {
+    // Chosen JSONL changed — reset ALL scan state for the new file so stale
+    // counters or tail-state from the old file don't leak through.
+    _ownJsonlPath = pick;
+    _ownJsonlReadBytes = 0;
+    _ownJsonlToolCalls = 0;
+    _ownJsonlLastAt = null;
+    _ownJsonlActivityState = null;
+    _ownJsonlToolName = null;
+    _ownJsonlStateChangedAt = null;
+  } else if (pick) {
+    _ownJsonlPath = pick;
   }
   return _ownJsonlPath;
 }
