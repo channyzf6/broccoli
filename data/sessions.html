@@ -470,13 +470,17 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  // Match a session against a group's members. A session matches if any
-  // member rule matches: either { key: "cwd", value: s.cwd } or
-  // { key: "sessionName", value: s.sessionName }.
+  // Does a single member rule match a given session?
+  function memberMatchesSession(m, session) {
+    if (m.key === "cwd" && session.cwd && m.value === session.cwd) return true;
+    if (m.key === "sessionName" && session.sessionName && m.value === session.sessionName) return true;
+    return false;
+  }
+
+  // A session matches a group if ANY member rule matches it.
   function sessionMatchesGroup(session, group) {
     for (const m of group.members || []) {
-      if (m.key === "cwd" && session.cwd && m.value === session.cwd) return true;
-      if (m.key === "sessionName" && session.sessionName && m.value === session.sessionName) return true;
+      if (memberMatchesSession(m, session)) return true;
     }
     return false;
   }
@@ -529,9 +533,16 @@
     }
   }
 
-  // Move a session (identified by its current matchKey) into the target
-  // group. If targetGroupId is null, the session is removed from all groups
-  // (i.e. becomes Ungrouped). Returns true if anything changed.
+  // Move a session into the target group (or to Ungrouped when targetGroupId
+  // is null). Returns true if anything changed.
+  //
+  // Removing: strip ANY rule that currently matches this session — not just
+  // the rule corresponding to our preferred matchKey. A session can be
+  // grouped by one identifier (e.g. cwd, when it had no name) and later
+  // acquire a different identifier (e.g. sessionName after /rename). If we
+  // only removed rules for the preferred matchKey, the stale rule would
+  // keep the session pinned to its old group and the drag would appear to
+  // do nothing.
   function assignSessionToGroup(session, targetGroupId) {
     const mk = matchKeyForSession(session);
     if (!mk) return false; // no stable identifier — can't persist
@@ -539,7 +550,7 @@
     let changed = false;
     for (const g of groupsState) {
       const before = g.members.length;
-      g.members = g.members.filter((m) => !(m.key === mk.key && m.value === mk.value));
+      g.members = g.members.filter((m) => !memberMatchesSession(m, session));
       if (g.members.length !== before) changed = true;
     }
     if (targetGroupId) {
