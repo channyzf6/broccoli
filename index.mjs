@@ -223,6 +223,20 @@ let _ownJsonlLastAt = null;      // epoch ms of the most recent tool_use
 let _ownJsonlActivityState = null;   // "running" | "thinking" | "idle" | null
 let _ownJsonlToolName = null;        // last tool_use's name when state === "running"
 let _ownJsonlStateChangedAt = null;  // epoch ms of the line that set the current state
+// Flipped to true after the first successful scan. Used to keep publishing
+// last-known state through transient read errors instead of losing a whole
+// 5s tick (which would also lose the monotonic tool_call bump on that tick).
+let _ownJsonlReady = false;
+
+function ownJsonlSnapshot() {
+  return {
+    count: _ownJsonlToolCalls,
+    lastAt: _ownJsonlLastAt,
+    activityState: _ownJsonlActivityState,
+    toolName: _ownJsonlToolName,
+    stateChangedAt: _ownJsonlStateChangedAt,
+  };
+}
 
 // Pure path resolver — no shared state mutation. Callable from any watcher
 // without perturbing the activity scanner's incremental read state.
@@ -282,6 +296,7 @@ async function identifyOwnJsonl() {
   const pick = await resolveOwnJsonlPath();
   if (!pick) return _ownJsonlPath; // resolver couldn't find a candidate
   if (pick !== _ownJsonlPath) {
+    _ownJsonlReady = false;
     // Chosen JSONL changed — reset ALL scan state for the new file so stale
     // counters or tail-state from the old file don't leak through.
     _ownJsonlPath = pick;
@@ -302,9 +317,11 @@ const JSONL_SCAN_CHUNK_BYTES = 8 * 1024 * 1024;
 
 async function scanOwnJsonlActivity() {
   const fp = await identifyOwnJsonl();
-  if (!fp) return null;
+  if (!fp) return _ownJsonlReady ? ownJsonlSnapshot() : null;
   let st;
-  try { st = await fsp.stat(fp); } catch { return null; }
+  try { st = await fsp.stat(fp); } catch {
+    return _ownJsonlReady ? ownJsonlSnapshot() : null;
+  }
   // File truncation / rewrite detection. If the file shrank below our
   // accumulated offset, CC either rotated the JSONL or re-opened from scratch
   // — reset scanner state so the next read re-parses from byte 0.
@@ -315,15 +332,11 @@ async function scanOwnJsonlActivity() {
     _ownJsonlActivityState = null;
     _ownJsonlToolName = null;
     _ownJsonlStateChangedAt = null;
+    _ownJsonlReady = false;
   }
   if (_ownJsonlReadBytes >= st.size) {
-    return {
-      count: _ownJsonlToolCalls,
-      lastAt: _ownJsonlLastAt,
-      activityState: _ownJsonlActivityState,
-      toolName: _ownJsonlToolName,
-      stateChangedAt: _ownJsonlStateChangedAt,
-    };
+    _ownJsonlReady = true;
+    return ownJsonlSnapshot();
   }
   try {
     const fh = await fsp.open(fp, "r");
@@ -335,13 +348,7 @@ async function scanOwnJsonlActivity() {
       if (bytesRead === 0) {
         // File shrank between stat and read, or concurrent truncation. Bail;
         // next scan's truncation branch above will reset state.
-        return {
-          count: _ownJsonlToolCalls,
-          lastAt: _ownJsonlLastAt,
-          activityState: _ownJsonlActivityState,
-          toolName: _ownJsonlToolName,
-          stateChangedAt: _ownJsonlStateChangedAt,
-        };
+        return ownJsonlSnapshot();
       }
       // Only decode the bytes we actually read — avoids stray NULs from the
       // tail of Buffer.alloc on a short read.
@@ -349,15 +356,7 @@ async function scanOwnJsonlActivity() {
       // If we ended mid-line, back off to the last newline so partial lines
       // are reconsidered on the next scan when more bytes have flushed.
       const lastNl = text.lastIndexOf("\n");
-      if (lastNl === -1) {
-        return {
-          count: _ownJsonlToolCalls,
-          lastAt: _ownJsonlLastAt,
-          activityState: _ownJsonlActivityState,
-          toolName: _ownJsonlToolName,
-          stateChangedAt: _ownJsonlStateChangedAt,
-        };
-      }
+      if (lastNl === -1) return ownJsonlSnapshot();
       _ownJsonlReadBytes += lastNl + 1;
       for (const line of text.slice(0, lastNl).split("\n")) {
         if (!line) continue;
@@ -408,14 +407,11 @@ async function scanOwnJsonlActivity() {
         }
       }
     } finally { await fh.close(); }
-  } catch { return null; }
-  return {
-    count: _ownJsonlToolCalls,
-    lastAt: _ownJsonlLastAt,
-    activityState: _ownJsonlActivityState,
-    toolName: _ownJsonlToolName,
-    stateChangedAt: _ownJsonlStateChangedAt,
-  };
+  } catch {
+    return _ownJsonlReady ? ownJsonlSnapshot() : null;
+  }
+  _ownJsonlReady = true;
+  return ownJsonlSnapshot();
 }
 
 function startActivityWatch() {
