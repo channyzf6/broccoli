@@ -189,96 +189,80 @@
     background: rgba(255,255,255,.06); padding: .1rem .4rem; border-radius: 4px;
     color: var(--text);
   }
+  /* Two-row card. Card itself is a flex-row so the status pill can sit
+     vertically centered across both inner rows. Host is exposed only via
+     the card tooltip — no color stripe (the group section's own accent
+     already owns the left-edge color channel; a per-card stripe would
+     stack against it and turn the dashboard chromatic). */
   .session {
-    background: rgba(0,0,0,.22); border: 1px solid var(--border); border-radius: 11px;
-    padding: .85rem 1.1rem; font-family: var(--mono); font-size: .82rem;
-    display: flex; flex-direction: column; gap: .4rem;
-    transition: border-color .25s ease, transform .1s ease, opacity .15s ease;
+    background: rgba(0,0,0,.22);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .85rem 1.05rem;
+    font-family: ui-sans-serif, system-ui, sans-serif; font-size: .85rem;
+    display: flex; flex-direction: row; align-items: center; gap: .9rem;
+    transition: border-color .25s ease, transform .1s ease, opacity .15s ease, background .15s ease;
     cursor: grab;
   }
   .session:active { cursor: grabbing; }
   .session.dragging { opacity: .45; }
-  .session:hover { transform: translateY(-1px); border-color: rgba(96,165,250,.35); }
+  .session:hover {
+    transform: translateY(-1px);
+    background: rgba(255,255,255,.025);
+    border-color: rgba(96,165,250,.4);
+  }
   .session.fresh { border-color: rgba(74,222,128,.5); }
-  .session.idle  { border-color: rgba(245,193,58,.4); opacity: .88; }
-  .session .row { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-  /* Host glyph — small dim badge before the pid. Hue shifts per host so the
-     two CLIs are distinguishable at a glance but never loud. */
-  .session .host {
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-weight: 700;
-    font-size: .7rem;
-    line-height: 1;
-    padding: .18rem .33rem;
-    border-radius: 4px;
-    flex-shrink: 0;
-    letter-spacing: .02em;
-    color: var(--muted);
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.06);
+  .session.idle  { border-color: rgba(245,193,58,.4); opacity: .9; }
+
+  /* .body stacks ident + optional locator vertically. Takes all leftover
+     horizontal space so the locator has room for long cwd/branch values. */
+  .session .body {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: .35rem;
   }
-  .session .host-claude { color: #c39bff; border-color: rgba(195,155,255,.25); }
-  .session .host-gemini { color: #7fd4c5; border-color: rgba(127,212,197,.25); }
-  .session .pid { color: var(--blue); font-weight: 600; flex-shrink: 0; }
-  .session .name {
-    color: var(--gold); font-weight: 700;
+
+  /* Primary identifier. Named sessions use heavier weight + full-text
+     color; unnamed cwd-fallback uses dim + medium weight. No hue
+     difference — saves a color, keeps "named vs not" as weight alone. */
+  .session .ident {
+    color: var(--dim); font-weight: 500;
+    font-size: .95rem; letter-spacing: -.005em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: ui-sans-serif, system-ui, sans-serif; font-size: .95rem;
+    min-width: 0;
   }
-  .session .cwd {
-    color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: .74rem;
-  }
-  .session .cwd-strong {
-    color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-weight: 500;
-  }
-  /* Merged meta row: cwd · uptime. No longer right-aligns, no longer splits
-     uptime from tool-calls — idle/working signal lives in the status pill
-     on the top row instead. */
-  .session .meta {
-    color: var(--dim); font-size: .72rem;
-    display: flex; align-items: center; gap: .4rem;
-    overflow: hidden;
-  }
-  .session .meta .cwd-cell {
+  .session .ident.named { color: var(--text); font-weight: 600; }
+
+  /* Locator row: dim mono, full width of .body. No flex contention with
+     the status pill so even long "<cwd>/<branch>" values breathe.
+     Detached HEAD flips to orange italic — a legitimate state warning,
+     not decoration. */
+  .session .locator {
+    color: var(--dim); font-family: var(--mono); font-size: .76rem;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    min-width: 0; flex-shrink: 1;
+    opacity: .9; letter-spacing: .01em;
   }
-  .session .meta .sep { opacity: .5; flex-shrink: 0; }
-  .session .meta .age { flex-shrink: 0; font-family: var(--mono); opacity: .85; }
-  /* Git branch cell: same dim tone as cwd, mono. Detached HEAD gets orange
-     italic so a non-branch state reads as distinct without miscoding as
-     warning. Truncates with ellipsis at a generous ceiling. */
-  .session .meta .branch {
-    color: var(--dim);
-    font-family: var(--mono);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    flex: 0 1 auto; min-width: 0; max-width: 20em;
+  .session .locator.detached { color: #fb923c; font-style: italic; }
+  /* Branch glyph — bumped a tick over the locator's base size so the
+     ⎇ reads clearly at small sizes on every font stack. Slight opacity
+     boost over the rest of the dim locator so it's the visual anchor. */
+  .session .locator .branch-glyph {
+    font-size: .95rem;
+    opacity: 1;
+    vertical-align: -1px;
+    /* Asymmetric: wider gap before the glyph (detaches it from the cwd)
+       and a tighter gap after so ⎇ visually belongs to the branch name
+       that follows it. */
+    margin-left: .5rem;
+    margin-right: .18rem;
   }
-  .session .meta .branch.detached { color: #fb923c; font-style: italic; }
-  /* Drag-handle grip: surfaces that the card is draggable without requiring
-     the user to try it first. Faint at rest, brightens as the card is
-     hovered so focus stays on the card content until the user reaches for
-     the handle. */
-  .session .meta .drag-handle {
-    margin-left: auto;
-    flex-shrink: 0;
-    color: var(--dim); opacity: .3;
-    font-size: 1rem; line-height: 1;
-    user-select: none;
-    transition: opacity .15s ease, color .15s ease;
-    padding: 0 .1rem;
-    letter-spacing: -.15em;
-  }
-  .session:hover .meta .drag-handle { opacity: .75; color: var(--text); }
-  /* Status pill: consistent sentence-case voice for both working and idle
-     states so they read as variants of the same concept. */
+
+  /* Status pill: the card's only color accent. flex-shrink:0 keeps it
+     whole at the right edge; align-items:center on .session vertically
+     centers it between row 1 and row 2. */
   .session .status {
-    margin-left: auto;
-    font-size: .72rem; font-weight: 600;
-    padding: .15rem .6rem; border-radius: 999px; white-space: nowrap;
     flex-shrink: 0;
+    font-size: .72rem; font-weight: 600;
+    padding: .2rem .65rem; border-radius: 999px; white-space: nowrap;
     display: inline-flex; align-items: center; gap: .4rem;
     font-family: ui-sans-serif, system-ui, sans-serif;
   }
@@ -414,17 +398,35 @@
     return parts.length >= 2 ? parts.slice(-2).join("/") : parts.join("/") || p;
   }
 
-  // Host identifier — shown as a small glyph beside the pid on each card
-  // so users can tell Claude sessions from Gemini (or future CLIs) at a glance.
-  function hostGlyph(h) {
-    if (h === "gemini") return "G";
-    if (h === "claude") return "C";
-    return "?";
+  // Final path segment only — used inside the locator where we compose
+  // "<cwd>/<branch>" and an extra parent-dir slash would read ambiguously
+  // (is `.../sessions-dashboard/card-redesign` a subdir path or a branch?).
+  function basenameLast(p) {
+    if (!p) return "—";
+    const parts = String(p).split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || p;
   }
+
+  // Host label — shown in the card tooltip. Host is encoded on the card's
+  // left-edge stripe visually (see `.session[data-host]` CSS).
   function hostLabel(h) {
     if (h === "gemini") return "Gemini CLI";
     if (h === "claude") return "Claude Code";
     return "unknown host";
+  }
+
+  // Composite card tooltip — surfaces fields demoted from visible chrome
+  // (pid, full cwd, uptime, host label, session id). Shared between
+  // renderSessionCard and updateCardInPlace so the two paths can't drift.
+  function buildCardTooltip(s) {
+    return [
+      s.sessionName || null,
+      s.cwd || null,
+      s.pid != null ? `pid ${s.pid}` : null,
+      `up ${fmtAge(s.ageMs)}`,
+      hostLabel(s.host),
+      s.id ? `session ${s.id}` : null,
+    ].filter(Boolean).join("\n");
   }
 
   // Format a gitBranch payload ({branch, sha, detached} | null) for display.
@@ -438,6 +440,55 @@
       return { text: gb.branch, title: "refs/heads/" + gb.branch, detached: false };
     }
     return null;
+  }
+
+  // Build the "where am I working" locator — a single compound string that
+  // collapses cwd and branch into one token. Return { text, title, detached }
+  // or null when the session has neither cwd-to-show nor a branch.
+  //
+  // - Named session in a repo on a branch:     "repos_llm/main"
+  // - Named session in a repo, detached HEAD:  "repos_llm (a1b2c3d)"
+  // - Named session, no repo:                  "repos_llm"
+  // - Unnamed session, on a branch:            "main"  (cwd already shown as ident)
+  // - Unnamed session, detached:               "(a1b2c3d)"
+  // - Unnamed session, no repo:                null (ident already carries cwd)
+  // U+2387 "alternative key symbol" — the de facto git-branch glyph used
+  // in prompt themes (Starship, p10k, oh-my-zsh agnoster). Disambiguates
+  // the branch name from any '/' that might appear in the cwd basename.
+  const BRANCH_GLYPH = "⎇";
+
+  // Paint locator text into an element, wrapping the branch glyph in its
+  // own span so CSS can style it (larger, brighter). Idempotent — safe
+  // to call on an already-populated element.
+  function applyLocatorText(el, text) {
+    el.textContent = "";
+    const i = text.indexOf(BRANCH_GLYPH);
+    if (i === -1) { el.textContent = text; return; }
+    // Pre-glyph segment (trim trailing space since the span has its own margin).
+    const before = text.slice(0, i).replace(/\s+$/, "");
+    const after = text.slice(i + BRANCH_GLYPH.length).replace(/^\s+/, "");
+    if (before) el.append(document.createTextNode(before));
+    const g = document.createElement("span");
+    g.className = "branch-glyph";
+    g.textContent = BRANCH_GLYPH;
+    el.append(g);
+    if (after) el.append(document.createTextNode(after));
+  }
+
+  function buildLocator(s) {
+    // Only include the cwd portion when both sessionName AND cwd exist —
+    // otherwise basenameLast would return "—" and we'd render a stray em-dash.
+    const cwdShown = (s.sessionName && s.cwd) ? basenameLast(s.cwd) : null;
+    const gb = formatGitBranch(s.gitBranch);
+    if (!cwdShown && !gb) return null;
+    if (cwdShown && gb && !gb.detached) {
+      return { text: cwdShown + " " + BRANCH_GLYPH + " " + gb.text, title: (s.cwd || "") + "\n" + gb.title };
+    }
+    if (cwdShown && gb && gb.detached) {
+      return { text: cwdShown + " " + gb.text, title: (s.cwd || "") + "\n" + gb.title, detached: true };
+    }
+    if (cwdShown) return { text: cwdShown, title: s.cwd || "" };
+    return { text: gb.text, title: gb.title, detached: !!gb.detached };
   }
 
   // Context-window sizes for known Claude models. The proxy reports model as
@@ -674,72 +725,34 @@
     li.dataset.sessionName = s.sessionName || "";
     li.dataset.host = s.host || "claude";
 
-    // Top row: host glyph + pid + primary identifier (sessionName or cwd
-    // basename) + status pill. Host glyph lets the user tell at a glance
-    // which CLI this card belongs to (C = Claude Code, G = Gemini CLI).
-    const row1 = document.createElement("div"); row1.className = "row";
-    const host = document.createElement("span"); host.className = "host host-" + (s.host || "claude");
-    host.textContent = hostGlyph(s.host);
-    host.title = hostLabel(s.host);
-    row1.append(host);
-    const pid = document.createElement("span"); pid.className = "pid";
-    pid.textContent = s.pid != null ? String(s.pid) : "?";
-    pid.title = "pid " + (s.pid ?? "unknown");
-    row1.append(pid);
+    // Two-row card. .body stacks ident (top) + locator (below). Status
+    // pill sits as a sibling and is vertically centered between the two
+    // rows via .session's align-items:center. Host is tooltip-only — no
+    // visible color stripe, so the group section's color stripe can be
+    // the only left-edge signal in the view.
+    const body = document.createElement("div"); body.className = "body";
+
+    const ident = document.createElement("span"); ident.className = "ident";
     if (s.sessionName) {
-      const nm = document.createElement("span"); nm.className = "name"; nm.title = s.sessionName;
-      nm.textContent = s.sessionName;
-      row1.append(nm);
+      ident.classList.add("named");
+      ident.textContent = s.sessionName;
     } else {
-      const cwdStrong = document.createElement("span"); cwdStrong.className = "cwd-strong";
-      cwdStrong.title = s.cwd || "";
-      cwdStrong.textContent = basename(s.cwd);
-      row1.append(cwdStrong);
+      ident.textContent = basename(s.cwd);
     }
-    row1.append(buildStatusPill(s));
+    body.append(ident);
 
-    // Bottom meta row: cwd basename + git branch + uptime, bullet-separated.
-    // Merges what were previously three dim-gray rows (cwd / session id /
-    // uptime) into a single glanceable line; session id moves to card tooltip.
-    const meta = document.createElement("div"); meta.className = "meta";
-    // We only show cwd here if a sessionName was displayed above; otherwise
-    // the top row's cwd-strong already carries it.
-    if (s.sessionName) {
-      const cwdCell = document.createElement("span"); cwdCell.className = "cwd-cell";
-      cwdCell.title = s.cwd || "";
-      cwdCell.textContent = basename(s.cwd);
-      meta.append(cwdCell);
-      const sep = document.createElement("span"); sep.className = "sep"; sep.textContent = "·";
-      meta.append(sep);
+    const loc = buildLocator(s);
+    if (loc) {
+      const el = document.createElement("span"); el.className = "locator";
+      if (loc.detached) el.classList.add("detached");
+      applyLocatorText(el, loc.text);
+      el.title = loc.title;
+      body.append(el);
     }
-    // Git branch cell (nullable — omitted when session cwd isn't in a repo).
-    const gb = formatGitBranch(s.gitBranch);
-    if (gb) {
-      const br = document.createElement("span");
-      br.className = "branch" + (gb.detached ? " detached" : "");
-      br.textContent = gb.text;
-      br.title = gb.title;
-      meta.append(br);
-      const brSep = document.createElement("span"); brSep.className = "sep branch-sep"; brSep.textContent = "·";
-      meta.append(brSep);
-    }
-    const age = document.createElement("span"); age.className = "age";
-    age.textContent = "up " + fmtAge(s.ageMs);
-    meta.append(age);
 
-    // Drag-handle grip — surfaces that the card is draggable without the
-    // user having to try it first. The Unicode chars are two vertical-ellipsis
-    // glyphs side-by-side, which render as a classic 2x3 dot grip across
-    // every reasonable font. Styling lives in .session .meta .drag-handle.
-    const grip = document.createElement("span");
-    grip.className = "drag-handle";
-    grip.textContent = "⋮⋮";
-    grip.title = "drag to move";
-    grip.setAttribute("aria-hidden", "true");
-    meta.append(grip);
-
-    li.append(row1, meta);
-    li.title = (s.sessionName ? s.sessionName + "\n" : "") + (s.cwd || "") + "\nsession " + (s.id || "");
+    li.append(body);
+    li.append(buildStatusPill(s));
+    li.title = buildCardTooltip(s);
 
     li.addEventListener("mousedown", () => { isMouseDownOnCard = true; });
     li.addEventListener("dragstart", (e) => {
@@ -953,40 +966,38 @@
     if (!card) return;
     card.classList.remove("fresh", "idle");
     card.classList.add(s.lastSeenAgoMs < TIMINGS.freshThresholdMs ? "fresh" : "idle");
-    // Update only the uptime text; cwd-cell and separator are static for a
-    // given session and don't need refreshing.
-    const ageEl = card.querySelector(".meta .age");
-    if (ageEl) ageEl.textContent = "up " + fmtAge(s.ageMs);
-    // Replace the status pill in place so working/idle transitions animate
-    // smoothly without rebuilding the whole card.
+
+    // Tooltip refresh — but NOT while the card is being hovered. Rewriting
+    // `title` on an active tooltip closes and re-opens the native popup on
+    // every update, causing a visible blink every 2s. Accepting slightly
+    // stale uptime while hovered is a fine trade — the tooltip refreshes
+    // the next time the user hovers away and back.
+    if (!card.matches(":hover")) {
+      card.title = buildCardTooltip(s);
+    }
+
+    // Status pill — replace in place so working/idle transitions animate.
     const oldStatus = card.querySelector(".status");
     if (oldStatus) oldStatus.replaceWith(buildStatusPill(s));
-    // Branch cell: create / update / remove in place. Doing this here
-    // (instead of via structuralSignature → full rebuild) keeps drag
-    // stability when another session's branch changes mid-drag.
-    const meta = card.querySelector(".meta");
-    if (meta) {
-      const gb = formatGitBranch(s.gitBranch);
-      let branchEl = meta.querySelector(".branch");
-      let branchSep = meta.querySelector(".branch-sep");
-      if (gb) {
-        if (!branchEl) {
-          branchEl = document.createElement("span");
-          branchEl.className = "branch";
-          branchSep = document.createElement("span");
-          branchSep.className = "sep branch-sep";
-          branchSep.textContent = "·";
-          // Insert before the age cell so ordering stays: cwd · branch · up N.
-          const ageNode = meta.querySelector(".age");
-          if (ageNode) { meta.insertBefore(branchEl, ageNode); meta.insertBefore(branchSep, ageNode); }
-          else { meta.appendChild(branchEl); meta.appendChild(branchSep); }
+
+    // Locator lives inside .body now (not alongside the status pill).
+    // Kept outside the structuralSignature fast-path so a cross-session
+    // branch change doesn't rebuild any card and break a concurrent drag.
+    const body = card.querySelector(".body");
+    if (body) {
+      const loc = buildLocator(s);
+      let locEl = body.querySelector(":scope > .locator");
+      if (loc) {
+        if (!locEl) {
+          locEl = document.createElement("span");
+          locEl.className = "locator";
+          body.appendChild(locEl); // always last child of .body
         }
-        branchEl.textContent = gb.text;
-        branchEl.title = gb.title;
-        branchEl.classList.toggle("detached", !!gb.detached);
-      } else if (branchEl) {
-        branchEl.remove();
-        if (branchSep) branchSep.remove();
+        applyLocatorText(locEl, loc.text);
+        locEl.title = loc.title;
+        locEl.classList.toggle("detached", !!loc.detached);
+      } else if (locEl) {
+        locEl.remove();
       }
     }
   }
