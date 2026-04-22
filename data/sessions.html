@@ -242,6 +242,15 @@
     opacity: .9; letter-spacing: .01em;
   }
   .session .locator.detached { color: #fb923c; font-style: italic; }
+  /* Branch glyph — bumped a tick over the locator's base size so the
+     ⎇ reads clearly at small sizes on every font stack. Slight opacity
+     boost over the rest of the dim locator so it's the visual anchor. */
+  .session .locator .branch-glyph {
+    font-size: .95rem;
+    opacity: 1;
+    vertical-align: -1px;
+    margin: 0 .08rem;
+  }
 
   /* Status pill: the card's only color accent. flex-shrink:0 keeps it
      whole at the right edge; align-items:center on .session vertically
@@ -443,6 +452,24 @@
   // in prompt themes (Starship, p10k, oh-my-zsh agnoster). Disambiguates
   // the branch name from any '/' that might appear in the cwd basename.
   const BRANCH_GLYPH = "⎇";
+
+  // Paint locator text into an element, wrapping the branch glyph in its
+  // own span so CSS can style it (larger, brighter). Idempotent — safe
+  // to call on an already-populated element.
+  function applyLocatorText(el, text) {
+    el.textContent = "";
+    const i = text.indexOf(BRANCH_GLYPH);
+    if (i === -1) { el.textContent = text; return; }
+    // Pre-glyph segment (trim trailing space since the span has its own margin).
+    const before = text.slice(0, i).replace(/\s+$/, "");
+    const after = text.slice(i + BRANCH_GLYPH.length).replace(/^\s+/, "");
+    if (before) el.append(document.createTextNode(before));
+    const g = document.createElement("span");
+    g.className = "branch-glyph";
+    g.textContent = BRANCH_GLYPH;
+    el.append(g);
+    if (after) el.append(document.createTextNode(after));
+  }
 
   function buildLocator(s) {
     // Only include the cwd portion when both sessionName AND cwd exist —
@@ -714,7 +741,7 @@
     if (loc) {
       const el = document.createElement("span"); el.className = "locator";
       if (loc.detached) el.classList.add("detached");
-      el.textContent = loc.text;
+      applyLocatorText(el, loc.text);
       el.title = loc.title;
       body.append(el);
     }
@@ -956,7 +983,7 @@
           locEl.className = "locator";
           body.appendChild(locEl); // always last child of .body
         }
-        locEl.textContent = loc.text;
+        applyLocatorText(locEl, loc.text);
         locEl.title = loc.title;
         locEl.classList.toggle("detached", !!loc.detached);
       } else if (locEl) {
