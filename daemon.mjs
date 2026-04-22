@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
 import { chromium } from "playwright";
+import { focusSession } from "./lib/focus.mjs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -384,6 +385,13 @@ function listSessions() {
   }));
 }
 
+// Platform-conditional capabilities. The focus endpoint only actually works
+// on macOS (AppleScript-driven). Advertising this lets the frontend hide
+// UI it can't usefully offer on Windows / Linux daemons.
+const DAEMON_CAPABILITIES = Object.freeze({
+  focus: process.platform === "darwin",
+});
+
 async function daemon_info() {
   return {
     pid: process.pid,
@@ -392,6 +400,7 @@ async function daemon_info() {
     browserConnected: !!(browser && browser.isConnected()),
     webviews: (await list_webviews()).webviews,
     sessions: listSessions(),
+    capabilities: DAEMON_CAPABILITIES,
   };
 }
 
@@ -500,7 +509,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url === "/sessions") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ sessions: listSessions(), daemon: { pid: process.pid, port: PORT, startedAt } }));
+      res.end(JSON.stringify({ sessions: listSessions(), daemon: { pid: process.pid, port: PORT, startedAt, capabilities: DAEMON_CAPABILITIES } }));
       return;
     }
     if (req.method === "GET" && (req.url === "/session-groups" || req.url.startsWith("/session-groups?"))) {
@@ -616,6 +625,30 @@ const server = http.createServer(async (req, res) => {
       const existed = sessions.delete(body.sessionId);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, removed: existed }));
+      return;
+    }
+    // Focus a session's terminal tab (macOS only — see lib/focus.mjs).
+    // The body's sessionId must correspond to an entry in our own registry;
+    // we never take a pid from the HTTP body.
+    if (req.method === "POST" && req.url === "/session/focus") {
+      const body = parseBody(await readBody(req), res);
+      if (body === null) return;
+      if (!requireSessionId(body, res)) return;
+      const s = sessions.get(body.sessionId);
+      if (!s) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "no such session", sessionId: body.sessionId }));
+        return;
+      }
+      const result = await focusSession({ pid: s.pid });
+      // 501 for platform/terminal unsupported, 200 for success, 500 for
+      // concrete runtime failures (osascript died, session pid gone, etc.).
+      const errMsg = result.error || "";
+      const status = result.ok ? 200 : (
+        /implemented on macOS|not supported for|invalid session pid/.test(errMsg) ? 501 : 500
+      );
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(result));
       return;
     }
     if (req.method === "POST" && req.url === "/session/activity") {
