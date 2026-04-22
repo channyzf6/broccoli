@@ -1,6 +1,6 @@
 # sessions-dashboard
 
-**A live dashboard for every Claude Code session you're running.** See what each one's doing in real time, organize them into groups, and control their shared browser from any session.
+**A live dashboard for every Claude Code *or Gemini CLI* session you're running.** See what each one's doing in real time, organize them into groups, and control their shared browser from any session.
 
 <!-- TODO: add docs/dashboard.png once a clean screenshot is available -->
 
@@ -82,6 +82,42 @@ Or edit `~/.claude/settings.json` directly:
 
 On Windows, use something like `C:\\Users\\<username>\\code\\sessions-dashboard\\index.mjs` (note the escaped backslashes). Restart Claude Code. Tools appear as `mcp__sessions-dashboard__*`.
 
+### Gemini CLI
+
+Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard, with a `C` / `G` glyph on each card so you can tell them apart.
+
+Register via the CLI:
+
+```bash
+gemini mcp add --scope user sessions-dashboard node "<absolute path>/index.mjs"
+```
+
+Or edit `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "sessions-dashboard": {
+      "command": "node",
+      "args": ["<absolute path>/index.mjs"],
+      "env": {
+        "SESSIONS_DASHBOARD_AUTOSTART": "1",
+        "SESSIONS_DASHBOARD_HOST": "gemini"
+      }
+    }
+  }
+}
+```
+
+`SESSIONS_DASHBOARD_HOST=gemini` tells the proxy which host scraping strategy to use; if omitted, the proxy auto-detects from cwd. Gemini CLI has no `/rename` slash command, so name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the Gemini session.
+
+**Compatibility matrix:**
+
+| Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
+|---|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
+| Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
+
 ---
 
 ## Quick tour
@@ -150,8 +186,10 @@ The last six are the shared-browser primitives — general-purpose, not dashboar
 | Env var | Default | Purpose |
 |---|---|---|
 | `SESSIONS_DASHBOARD_PORT` | `8787` | Port the daemon binds to on loopback. All sessions must agree. |
-| `SESSIONS_DASHBOARD_AUTOSTART` | unset | Set to `1` to register this session at CC startup, so it appears in the dashboard before any tool is invoked. |
-| `CLAUDE_SESSION_NAME` | unset | Sticky display name for this session. |
+| `SESSIONS_DASHBOARD_AUTOSTART` | unset | Set to `1` to register this session at startup, so it appears in the dashboard before any tool is invoked. |
+| `SESSIONS_DASHBOARD_HOST` | auto | `claude` or `gemini`. When unset, detected from which host's transcript dir matches the cwd. |
+| `SESSIONS_DASHBOARD_SESSION_NAME` | unset | Sticky display name for this session (cross-host). |
+| `CLAUDE_SESSION_NAME` | unset | Claude-era alias for `SESSIONS_DASHBOARD_SESSION_NAME`. |
 
 Set in the MCP server's `env` block in `settings.json`:
 
