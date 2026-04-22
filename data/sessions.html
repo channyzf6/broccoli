@@ -439,14 +439,19 @@
   // - Unnamed session, on a branch:            "main"  (cwd already shown as ident)
   // - Unnamed session, detached:               "(a1b2c3d)"
   // - Unnamed session, no repo:                null (ident already carries cwd)
+  // U+2387 "alternative key symbol" — the de facto git-branch glyph used
+  // in prompt themes (Starship, p10k, oh-my-zsh agnoster). Disambiguates
+  // the branch name from any '/' that might appear in the cwd basename.
+  const BRANCH_GLYPH = "⎇";
+
   function buildLocator(s) {
     // Only include the cwd portion when both sessionName AND cwd exist —
-    // otherwise basenameLast would return "—" and we'd render "—/main".
+    // otherwise basenameLast would return "—" and we'd render a stray em-dash.
     const cwdShown = (s.sessionName && s.cwd) ? basenameLast(s.cwd) : null;
     const gb = formatGitBranch(s.gitBranch);
     if (!cwdShown && !gb) return null;
     if (cwdShown && gb && !gb.detached) {
-      return { text: cwdShown + "/" + gb.text, title: (s.cwd || "") + "\n" + gb.title };
+      return { text: cwdShown + " " + BRANCH_GLYPH + " " + gb.text, title: (s.cwd || "") + "\n" + gb.title };
     }
     if (cwdShown && gb && gb.detached) {
       return { text: cwdShown + " " + gb.text, title: (s.cwd || "") + "\n" + gb.title, detached: true };
