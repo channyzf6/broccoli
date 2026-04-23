@@ -111,12 +111,36 @@ Or edit `~/.gemini/settings.json`:
 
 `SESSIONS_DASHBOARD_HOST=gemini` tells the proxy which host scraping strategy to use; if omitted, the proxy auto-detects from cwd. Gemini CLI has no `/rename` slash command, so name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the Gemini session.
 
+### Codex CLI
+
+Register via the CLI:
+
+```bash
+codex mcp add sessions-dashboard --scope user -- node "<absolute path>/index.mjs"
+```
+
+Or edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.sessions-dashboard]
+command = "node"
+args = ["<absolute path>/index.mjs"]
+env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
+```
+
+`SESSIONS_DASHBOARD_HOST=codex` tells the proxy which host scraping strategy to use; if omitted, auto-detection reads `~/.codex/sessions/<today-or-yesterday>/rollout-*.jsonl` first lines and matches on cwd.
+
+**Activity-pill caveat — set Codex to "Extended" persistence for full granularity.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events (`turn_started`, `exec_command_begin`, `mcp_tool_call_begin`). The activity pill in Limited mode can still show `idle` / `thinking` / "tool just completed" but cannot show `running <tool>` while a tool is in flight. To enable Extended mode, edit `~/.codex/config.toml` per the Codex docs (the relevant key has shifted between Codex versions; check `codex config schema`). When unsure, the dashboard still works in Limited mode — it just won't surface in-flight tool names.
+
+**Windows note:** Codex CLI is officially supported on Windows via WSL2 only. Run the daemon and Codex inside WSL together for the cleanest experience; native Windows builds of Codex are best-effort.
+
 **Compatibility matrix:**
 
 | Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
 |---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
 | Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode / partial in Limited | ✅ `/rename` |
 
 ---
 

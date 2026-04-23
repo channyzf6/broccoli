@@ -450,10 +450,14 @@
     return parts[parts.length - 1] || p;
   }
 
-  // Host label — shown in the card tooltip. Host is encoded on the card's
-  // left-edge stripe visually (see `.session[data-host]` CSS).
+  // Host label — shown in the card tooltip. Currently no visible host
+  // affordance on the card itself (the card-redesign PR removed the
+  // colored left-stripe that fought with group colors). The card sets
+  // `data-host` on its <li> so any future CSS rule can re-introduce a
+  // visible host signal without a code change.
   function hostLabel(h) {
     if (h === "gemini") return "Gemini CLI";
+    if (h === "codex")  return "Codex CLI";
     if (h === "claude") return "Claude Code";
     return "unknown host";
   }
