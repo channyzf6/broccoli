@@ -1,0 +1,6 @@
+{"sessionId":"s1","projectHash":"h1","startTime":"2026-04-23T17:00:00Z","lastUpdated":"2026-04-23T17:00:00Z","kind":"main","directories":[]}
+{"id":"m1","timestamp":"2026-04-23T17:00:01Z","type":"user","content":"first"}
+{"id":"m2","timestamp":"2026-04-23T17:00:02Z","type":"gemini","content":"reply"}
+{"id":"m3","timestamp":"2026-04-23T17:00:03Z","type":"user","content":"undo me"}
+{"$rewindTo":"m3"}
+{"id":"m3b","timestamp":"2026-04-23T17:00:10Z","type":"user","content":"replacement"}

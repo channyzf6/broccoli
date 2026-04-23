@@ -1,0 +1,4 @@
+{"sessionId":"s1","projectHash":"h1","startTime":"2026-04-23T17:00:00Z","lastUpdated":"2026-04-23T17:00:00Z","kind":"main","directories":[]}
+{"id":"m1","timestamp":"2026-04-23T17:00:01Z","type":"user","content":"hi"}
+{garbled line that won't JSON.parse
+{"id":"m2","timestamp":"2026-04-23T17:00:02Z","type":"gemini","content":"reply"}

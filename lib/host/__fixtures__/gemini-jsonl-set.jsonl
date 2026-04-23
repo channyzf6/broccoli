@@ -1,0 +1,4 @@
+{"sessionId":"s1","projectHash":"h1","startTime":"2026-04-23T17:00:00Z","lastUpdated":"2026-04-23T17:00:00Z","kind":"main","directories":[]}
+{"id":"m1","timestamp":"2026-04-23T17:00:01Z","type":"user","content":"hi"}
+{"$set":{"lastUpdated":"2026-04-23T17:05:00Z","summary":"first turn done"}}
+{"id":"m2","timestamp":"2026-04-23T17:05:30Z","type":"gemini","content":"sure"}
