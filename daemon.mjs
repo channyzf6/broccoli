@@ -107,6 +107,7 @@ async function open_webview({ name = "main", url: navUrl, html, title, width, he
 
   let rec = pages.get(name);
   let page;
+  let createdNew = false;
   if (rec && rec.page && !rec.page.isClosed()) {
     page = rec.page; // reuse existing named window
   } else {
@@ -124,9 +125,17 @@ async function open_webview({ name = "main", url: navUrl, html, title, width, he
       if (pages.get(name) === rec) pages.delete(name);
       rec.context.close().catch(() => {});
     });
+    createdNew = true;
   }
 
-  if (width && height) {
+  // Apply the configured size only on FIRST creation. Reopening a named
+  // window (the common "open sessions dashboard" case) re-navigates the
+  // existing page and must not resize — it would blow away the user's
+  // manual resize and on Windows would also un-maximize a maximized
+  // window via the windowState=normal step inside setWindowSizeUnlocked.
+  // dashboards.json width/height is now an initial-size, not a forced
+  // size.
+  if (createdNew && width && height) {
     await setWindowSizeUnlocked(page, width, height);
   }
   if (navUrl) await page.goto(navUrl, { waitUntil: "domcontentloaded" });
