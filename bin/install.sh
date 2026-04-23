@@ -45,10 +45,16 @@ for cli in claude gemini codex; do
   esac
   # Idempotent: remove any prior registration so re-running the installer
   # is a no-op update rather than a duplicate-registration failure.
-  "$cli" mcp remove sessions-dashboard "${scope_args[@]}" >/dev/null 2>&1 || true
+  #
+  # ${arr[@]+"${arr[@]}"} guard: Bash 3.2 (still the macOS-stock /bin/bash)
+  # errors on "${empty_array[@]}" under `set -u` with "unbound variable".
+  # Bash 4.4+ silently expands to nothing. The +-fallback pattern is the
+  # portable spelling — expand only if the array variable is set, which
+  # an empty array still is in semantics but not in 3.2's accounting.
+  "$cli" mcp remove sessions-dashboard ${scope_args[@]+"${scope_args[@]}"} >/dev/null 2>&1 || true
   # Register. Tolerate failure on a single CLI — keep going so a broken
   # Codex install doesn't block Claude/Gemini for the same user.
-  if "$cli" mcp add sessions-dashboard "${scope_args[@]}" "${env_args[@]}" -- node "$index"; then
+  if "$cli" mcp add sessions-dashboard ${scope_args[@]+"${scope_args[@]}"} ${env_args[@]+"${env_args[@]}"} -- node "$index"; then
     registered=$((registered + 1))
   else
     echo "    (registration with $cli failed; continuing)"
