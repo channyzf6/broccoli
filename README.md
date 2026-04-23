@@ -84,7 +84,7 @@ On Windows, use something like `C:\\Users\\<username>\\code\\sessions-dashboard\
 
 ### Gemini CLI
 
-Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard, with a `C` / `G` glyph on each card so you can tell them apart.
+Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph, so the visual stays uncluttered when you don't care which CLI is which.
 
 Register via the CLI:
 
