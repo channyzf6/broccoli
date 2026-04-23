@@ -32,16 +32,19 @@ for cli in claude gemini codex; do
   # accept that flag — its mcp add is global by default. Trying to pass
   # --scope to Codex errors out with "unexpected argument '--scope'."
   #
-  # env_args: pin the host explicitly for Codex. Without this, the proxy's
-  # cold-start dir-probe can misroute the session to ClaudeAdapter when
-  # Claude has any prior transcript in the same cwd (Codex hasn't yet
-  # flushed session_meta when detection runs), leaving the activity pill
-  # and /rename silently inert. Claude/Gemini have per-cwd transcript dirs
-  # so they don't suffer the same race; we leave them on auto-detect to
-  # keep the surface minimal.
+  # env_args: pin the host explicitly for non-Claude CLIs. Without this,
+  # the proxy's cold-start dir-probe can misroute the session to
+  # ClaudeAdapter when Claude has any prior transcript in the same cwd
+  # — Codex hasn't yet flushed session_meta when detection runs, and
+  # Gemini's chat file isn't created until the first user message, so
+  # both lose the most-recent-mtime tie-break to a freshly-touched
+  # Claude jsonl. The result is a silently-inert activity pill and
+  # wrong host label. Pinning skips the race entirely. Claude doesn't
+  # need pinning since it's the default fallback.
   case "$cli" in
-    claude|gemini) scope_args=(--scope user); env_args=() ;;
-    codex)         scope_args=();              env_args=(--env "SESSIONS_DASHBOARD_HOST=codex") ;;
+    claude) scope_args=(--scope user); env_args=() ;;
+    gemini) scope_args=(--scope user); env_args=(--env "SESSIONS_DASHBOARD_HOST=gemini") ;;
+    codex)  scope_args=();              env_args=(--env "SESSIONS_DASHBOARD_HOST=codex") ;;
   esac
   # Idempotent: remove any prior registration so re-running the installer
   # is a no-op update rather than a duplicate-registration failure.
