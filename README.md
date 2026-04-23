@@ -52,11 +52,11 @@ cd sessions-dashboard
 bin\install.bat
 ```
 
-The script registers the MCP server with Claude Code as `sessions-dashboard`. Restart Claude Code, then in any session ask:
+The script auto-detects which supported CLIs are on your PATH (Claude Code, Gemini CLI, Codex CLI) and registers the MCP server with each one. So a user with only Gemini gets Gemini-registered, a user with all three gets all three registered, and a user with none gets a clear error pointing them at the manual flow. Restart your CLI(s), then in any session ask:
 
 > *"Open the sessions dashboard"*
 
-Claude invokes `mcp__sessions-dashboard__open_dashboard` and a live window appears.
+Your CLI invokes `mcp__sessions-dashboard__open_dashboard` and a live window appears showing every connected session across all registered CLIs.
 
 ### Manual install
 
@@ -84,7 +84,7 @@ On Windows, use something like `C:\\Users\\<username>\\code\\sessions-dashboard\
 
 ### Gemini CLI
 
-Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard, with a `C` / `G` glyph on each card so you can tell them apart.
+Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph, so the visual stays uncluttered when you don't care which CLI is which.
 
 Register via the CLI:
 
@@ -111,12 +111,36 @@ Or edit `~/.gemini/settings.json`:
 
 `SESSIONS_DASHBOARD_HOST=gemini` tells the proxy which host scraping strategy to use; if omitted, the proxy auto-detects from cwd. Gemini CLI has no `/rename` slash command, so name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the Gemini session.
 
+### Codex CLI
+
+Register via the CLI:
+
+```bash
+codex mcp add sessions-dashboard -- node "<absolute path>/index.mjs"
+```
+
+Or edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.sessions-dashboard]
+command = "node"
+args = ["<absolute path>/index.mjs"]
+env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
+```
+
+`SESSIONS_DASHBOARD_HOST=codex` tells the proxy which host scraping strategy to use; if omitted, auto-detection reads `~/.codex/sessions/<today-or-yesterday>/rollout-*.jsonl` first lines and matches on cwd.
+
+**Activity-pill caveat — set Codex to "Extended" persistence for full granularity.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events (`task_started`, `exec_command_begin`, `mcp_tool_call_begin`). In Limited mode the activity pill can only show `working` (between a user message and the next `task_complete`) and `idle <duration>` after the task completes — tool names are never surfaced because the adapter has no signal for "tool currently executing." To enable Extended mode, edit `~/.codex/config.toml` per the Codex docs (the relevant key has shifted between Codex versions; check `codex config schema`). When unsure, the dashboard still works in Limited mode — it just won't surface tool names.
+
+**Windows note:** Codex CLI is officially supported on Windows via WSL2 only. Run the daemon and Codex inside WSL together for the cleanest experience; native Windows builds of Codex are best-effort.
+
 **Compatibility matrix:**
 
 | Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
 |---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
 | Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool name at all) | ✅ `/rename` |
 
 ---
 
