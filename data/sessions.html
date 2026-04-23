@@ -435,6 +435,17 @@
   // card and releases outside it.
   document.addEventListener("mouseup", () => { isMouseDownOnCard = false; });
 
+  // Blur a focused group-name field when the user clicks outside it. Without
+  // this, the field stays focused indefinitely after a "+ New group" click +
+  // walk-away, deferring the structural rebuild forever. Pointerdown (not
+  // click) so we beat the natural focus transfer.
+  document.addEventListener("pointerdown", (e) => {
+    const editing = document.activeElement;
+    if (!editing || !editing.classList?.contains("name") || !editing.isContentEditable) return;
+    if (editing.contains(e.target)) return; // click inside the editing field — leave focus alone
+    editing.blur();
+  });
+
   function basename(p) {
     if (!p) return "—";
     const parts = String(p).split(/[\\/]/).filter(Boolean);
@@ -1153,6 +1164,18 @@
       for (const s of sessionsState) updateCardInPlace(s);
       return;
     }
+
+    // If the user is editing a group name, defer the structural rebuild —
+    // it would rip the focused contenteditable out of the DOM and lose
+    // the user's in-progress edit. The fast-path above keeps card pills
+    // and "synced Xs ago" updating during the edit; structural changes
+    // (new group, dropped pin, joining session) wait until blur. The
+    // very next render() after blur picks them up.
+    if (isEditingName()) {
+      for (const s of sessionsState) updateCardInPlace(s);
+      return;
+    }
+
     lastStructuralSig = sig;
 
     groupsContainer.textContent = "";
@@ -1249,7 +1272,7 @@
   }
 
   async function poll() {
-    if (isDragging || isMouseDownOnCard || isEditingName() || isAnyDeleteArmed()) return;
+    if (isDragging || isMouseDownOnCard || isAnyDeleteArmed()) return;
     if (Date.now() - lastWriteAt < TIMINGS.writeSettleMs) return;
     try {
       const [sRes, gRes] = await Promise.all([
