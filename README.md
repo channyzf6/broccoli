@@ -140,7 +140,7 @@ env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
 |---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
 | Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
-| Codex CLI | ✅ | ✅ | ✅ Extended mode / partial in Limited | ✅ `/rename` |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows idle/thinking/just-completed only — no in-flight tool name) | ✅ `/rename` |
 
 ---
 
