@@ -31,16 +31,24 @@ for cli in claude gemini codex; do
   # mean "register globally for this user, not per-project." Codex doesn't
   # accept that flag — its mcp add is global by default. Trying to pass
   # --scope to Codex errors out with "unexpected argument '--scope'."
+  #
+  # env_args: pin the host explicitly for Codex. Without this, the proxy's
+  # cold-start dir-probe can misroute the session to ClaudeAdapter when
+  # Claude has any prior transcript in the same cwd (Codex hasn't yet
+  # flushed session_meta when detection runs), leaving the activity pill
+  # and /rename silently inert. Claude/Gemini have per-cwd transcript dirs
+  # so they don't suffer the same race; we leave them on auto-detect to
+  # keep the surface minimal.
   case "$cli" in
-    claude|gemini) scope_args=(--scope user) ;;
-    *)             scope_args=() ;;
+    claude|gemini) scope_args=(--scope user); env_args=() ;;
+    codex)         scope_args=();              env_args=(--env "SESSIONS_DASHBOARD_HOST=codex") ;;
   esac
   # Idempotent: remove any prior registration so re-running the installer
   # is a no-op update rather than a duplicate-registration failure.
   "$cli" mcp remove sessions-dashboard "${scope_args[@]}" >/dev/null 2>&1 || true
   # Register. Tolerate failure on a single CLI — keep going so a broken
   # Codex install doesn't block Claude/Gemini for the same user.
-  if "$cli" mcp add sessions-dashboard "${scope_args[@]}" -- node "$index"; then
+  if "$cli" mcp add sessions-dashboard "${scope_args[@]}" "${env_args[@]}" -- node "$index"; then
     registered=$((registered + 1))
   else
     echo "    (registration with $cli failed; continuing)"

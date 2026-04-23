@@ -130,7 +130,7 @@ env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
 
 `SESSIONS_DASHBOARD_HOST=codex` tells the proxy which host scraping strategy to use; if omitted, auto-detection reads `~/.codex/sessions/<today-or-yesterday>/rollout-*.jsonl` first lines and matches on cwd.
 
-**Activity-pill caveat — set Codex to "Extended" persistence for full granularity.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events (`turn_started`, `exec_command_begin`, `mcp_tool_call_begin`). The activity pill in Limited mode can still show `idle` / `thinking` / "tool just completed" but cannot show `running <tool>` while a tool is in flight. To enable Extended mode, edit `~/.codex/config.toml` per the Codex docs (the relevant key has shifted between Codex versions; check `codex config schema`). When unsure, the dashboard still works in Limited mode — it just won't surface in-flight tool names.
+**Activity-pill caveat — set Codex to "Extended" persistence for full granularity.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events (`task_started`, `exec_command_begin`, `mcp_tool_call_begin`). In Limited mode the activity pill can only show `working` (between a user message and the next `task_complete`) and `idle <duration>` after the task completes — tool names are never surfaced because the adapter has no signal for "tool currently executing." To enable Extended mode, edit `~/.codex/config.toml` per the Codex docs (the relevant key has shifted between Codex versions; check `codex config schema`). When unsure, the dashboard still works in Limited mode — it just won't surface tool names.
 
 **Windows note:** Codex CLI is officially supported on Windows via WSL2 only. Run the daemon and Codex inside WSL together for the cleanest experience; native Windows builds of Codex are best-effort.
 
@@ -140,7 +140,7 @@ env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
 |---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
 | Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
-| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows idle/thinking/just-completed only — no in-flight tool name) | ✅ `/rename` |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool name at all) | ✅ `/rename` |
 
 ---
 

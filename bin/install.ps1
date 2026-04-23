@@ -23,8 +23,21 @@ foreach ($cli in @('claude', 'gemini', 'codex')) {
     # to mean "register globally for this user, not per-project." Codex
     # doesn't accept that flag — its mcp add is global by default. Passing
     # --scope to Codex errors out with "unexpected argument '--scope'."
-    if ($cli -eq 'codex') { $scopeArgs = @() }
-    else                  { $scopeArgs = @('--scope', 'user') }
+    #
+    # envArgs: pin the host explicitly for Codex. Without this, the proxy's
+    # cold-start dir-probe can misroute the session to ClaudeAdapter when
+    # Claude has any prior transcript in the same cwd (Codex hasn't yet
+    # flushed session_meta when detection runs), leaving the activity pill
+    # and /rename silently inert. Claude/Gemini have per-cwd transcript
+    # dirs so they don't suffer the same race; we leave them on auto-detect
+    # to keep the surface minimal.
+    if ($cli -eq 'codex') {
+        $scopeArgs = @()
+        $envArgs   = @('--env', 'SESSIONS_DASHBOARD_HOST=codex')
+    } else {
+        $scopeArgs = @('--scope', 'user')
+        $envArgs   = @()
+    }
     # Idempotent: remove any prior registration so re-running the installer
     # is a no-op update. On PowerShell 7.4+ with $ErrorActionPreference='Stop'
     # and the default $PSNativeCommandUseErrorActionPreference=$true, a
@@ -37,7 +50,7 @@ foreach ($cli in @('claude', 'gemini', 'codex')) {
     # Register. Tolerate failure on a single CLI — keep going so a broken
     # Codex install on Windows doesn't block Claude/Gemini for the same user.
     try {
-        & $cli mcp add sessions-dashboard @scopeArgs -- node "$index"
+        & $cli mcp add sessions-dashboard @scopeArgs @envArgs -- node "$index"
         $registered++
     } catch {
         Write-Host "    (registration with $cli failed; continuing)"
