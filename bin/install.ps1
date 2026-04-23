@@ -21,7 +21,7 @@ foreach ($cli in @('claude', 'gemini', 'codex')) {
     Write-Host "  - $cli detected"
     # CLI-specific flag handling. Claude and Gemini accept `--scope user`
     # to mean "register globally for this user, not per-project." Codex
-    # doesn't accept that flag — its mcp add is global by default. Passing
+    # doesn't accept that flag -- its mcp add is global by default. Passing
     # --scope to Codex errors out with "unexpected argument '--scope'."
     #
     # envArgs: pin the host explicitly for Codex. Without this, the proxy's
@@ -43,11 +43,11 @@ foreach ($cli in @('claude', 'gemini', 'codex')) {
     # and the default $PSNativeCommandUseErrorActionPreference=$true, a
     # non-zero exit from `mcp remove` (which happens on first install
     # when there's nothing to remove) throws a terminating
-    # NativeCommandExitException — catch and discard.
+    # NativeCommandExitException -- catch and discard.
     try {
         & $cli mcp remove sessions-dashboard @scopeArgs 2>$null | Out-Null
     } catch {}
-    # Register. Tolerate failure on a single CLI — keep going so a broken
+    # Register. Tolerate failure on a single CLI -- keep going so a broken
     # Codex install on Windows doesn't block Claude/Gemini for the same user.
     try {
         & $cli mcp add sessions-dashboard @scopeArgs @envArgs -- node "$index"
@@ -60,7 +60,7 @@ foreach ($cli in @('claude', 'gemini', 'codex')) {
 if ($registered -eq 0) {
     Write-Host ""
     Write-Host "ERROR: no supported CLI found on PATH."
-    Write-Host "Install one of: claude, gemini, codex — then re-run this installer."
+    Write-Host "Install one of: claude, gemini, codex -- then re-run this installer."
     Write-Host "Or register manually:"
     Write-Host ""
     # Single-quoted literal + -f interpolation: PowerShell's parser
@@ -74,7 +74,7 @@ if ($registered -eq 0) {
 }
 
 Write-Host ""
-Write-Host "[3/3] done — registered with $registered CLI(s)."
+Write-Host "[3/3] done -- registered with $registered CLI(s)."
 Write-Host "Restart your CLI(s), then ask one of them:"
 Write-Host ""
 Write-Host '    "Open the sessions dashboard"'
