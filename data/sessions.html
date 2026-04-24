@@ -426,6 +426,11 @@
   // caller has already applied the optimistic mutation.
   let lastSyncedGroups = "[]";
   let lastSyncedPins = "[]";
+  // Per session.id → last-observed sessionName. Drives rename detection
+  // between polls so we can keep cards from jumping groups when a user
+  // /renames their session — see detectRenames() and
+  // reconcileRenamedSession() further down.
+  const lastSeenSessionNames = new Map();
   // Delete buttons are armed per-group (two-click confirm). Tracking the
   // armed set at module scope rather than via per-button closures means
   // re-renders (e.g. after a drop) don't orphan pending timers.
@@ -773,11 +778,15 @@
 
   // Where a session would be bucketed by member rules alone (no pins).
   // sessionName rules (specific) win over cwd rules (cohort-shared).
-  function resolveRuleGroupId(session) {
-    if (session.sessionName) {
+  // Optional `nameOverride` substitutes for `session.sessionName` —
+  // used by reconcileRenamedSession to ask "where would this session
+  // have been bucketed under its OLD name?" without mutating state.
+  function resolveRuleGroupId(session, nameOverride) {
+    const name = nameOverride !== undefined ? nameOverride : session.sessionName;
+    if (name) {
       for (const g of groupsState) {
         for (const m of g.members || []) {
-          if (m.key === "sessionName" && m.value === session.sessionName) return g.id;
+          if (m.key === "sessionName" && m.value === name) return g.id;
         }
       }
     }
@@ -789,6 +798,111 @@
       }
     }
     return null;
+  }
+
+  // Spot sessions whose sessionName changed since the last successful
+  // poll. Without this, a /rename quietly invalidates the sessionName
+  // rule that was placing the card and the card jumps to whichever
+  // other group happens to have a stale rule for the new name (or to
+  // Ungrouped if no rule matches). Also updates the per-session map
+  // so the next poll has the new baseline. First-observed sessions
+  // (previousName is undefined) are NOT treated as renames.
+  function detectRenames() {
+    const renames = [];
+    const liveIds = new Set();
+    for (const s of sessionsState) {
+      liveIds.add(s.id);
+      const previousName = lastSeenSessionNames.get(s.id);
+      lastSeenSessionNames.set(s.id, s.sessionName);
+      if (previousName && previousName !== s.sessionName) {
+        renames.push({ session: s, oldName: previousName });
+      }
+    }
+    // GC entries for sessions that have disappeared.
+    for (const id of [...lastSeenSessionNames.keys()]) {
+      if (!liveIds.has(id)) lastSeenSessionNames.delete(id);
+    }
+    return renames;
+  }
+
+  // Reconcile rules + pins so a renamed session stays in its current
+  // group. Called for each rename detected in detectRenames().
+  //
+  // Three things happen:
+  //   1. If the bucketing WOULD change AND no pin already protects
+  //      the session, write a pin to the OLD group. Pins are keyed
+  //      on session.id (stable across rename) and override rule
+  //      lookup, so this guarantees the card stays put for the rest
+  //      of the current session run.
+  //   2. Update the matching sessionName rule in the OLD group from
+  //      oldName -> newName. Preserves grouping across CLI restarts:
+  //      after restart the pin is gone (new session.id), but the
+  //      updated rule still matches the new name and re-buckets the
+  //      session into the same group. If newName already had a rule
+  //      in that group, drop the stale duplicate.
+  //   3. Scrub stale rules for oldName from OTHER groups, but only
+  //      if no live session still uses oldName. This cleans up rule
+  //      pollution that used to accumulate across renames (every
+  //      drag added a sessionName rule; nothing ever removed them).
+  //      Conditional cleanup avoids displacing a different live
+  //      session that happens to share the old name.
+  //
+  // Returns true if anything in groupsState/pinsState changed (the
+  // caller saves to /session-groups in that case).
+  function reconcileRenamedSession(session, oldName) {
+    const newName = session.sessionName;
+    const oldGroupId = resolveRuleGroupId(session, oldName);
+    const newGroupId = resolveRuleGroupId(session, newName);
+    let changed = false;
+
+    if (oldGroupId !== newGroupId) {
+      const existingPin = pinsState.find((p) => p.sessionId === session.id);
+      if (!existingPin) {
+        pinsState.push({ sessionId: session.id, groupId: oldGroupId });
+        changed = true;
+      }
+    }
+
+    if (oldGroupId) {
+      const g = groupsState.find((gg) => gg.id === oldGroupId);
+      if (g) {
+        const idx = g.members.findIndex(
+          (m) => m.key === "sessionName" && m.value === oldName,
+        );
+        if (idx >= 0) {
+          if (!newName) {
+            // Renamed away from a name to nameless — remove the rule
+            // rather than rewriting it to `value: null` (which would be a
+            // malformed rule that never matches anything anyway).
+            g.members.splice(idx, 1);
+          } else {
+            const newAlreadyHasRule = g.members.some(
+              (m) => m.key === "sessionName" && m.value === newName,
+            );
+            if (newAlreadyHasRule) {
+              g.members.splice(idx, 1);
+            } else {
+              g.members[idx] = { key: "sessionName", value: newName };
+            }
+          }
+          changed = true;
+        }
+      }
+    }
+
+    const oldNameStillInUse = sessionsState.some((s) => s.sessionName === oldName);
+    if (!oldNameStillInUse) {
+      for (const g of groupsState) {
+        if (g.id === oldGroupId) continue;
+        const before = g.members.length;
+        g.members = g.members.filter(
+          (m) => !(m.key === "sessionName" && m.value === oldName),
+        );
+        if (g.members.length !== before) changed = true;
+      }
+    }
+
+    return changed;
   }
 
   function renderSessionCard(s) {
@@ -1296,6 +1410,19 @@
         // view — any subsequent save failure will restore to this snapshot.
         lastSyncedGroups = JSON.stringify(groupsState);
         lastSyncedPins = JSON.stringify(pinsState);
+      }
+      // Detect any sessionName changes since the last poll and reconcile
+      // rules + pins so renamed cards stay in their current group rather
+      // than jumping to whichever other group has a stale rule for the
+      // new name (or to Ungrouped if no rule matches). Saves only when
+      // something actually changed.
+      const renames = detectRenames();
+      if (renames.length > 0) {
+        let changed = false;
+        for (const { session, oldName } of renames) {
+          if (reconcileRenamedSession(session, oldName)) changed = true;
+        }
+        if (changed) saveGroups();
       }
       lastPollOkAt = Date.now();
       render();
