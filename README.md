@@ -1,29 +1,29 @@
 # sessions-dashboard
 
-**A live dashboard for every Claude Code *or Gemini CLI* session you're running.** See what each one's doing in real time, organize them into groups, and control their shared browser from any session.
+**A live dashboard for every CLI agent session you're running** — Claude Code, Gemini CLI, and Codex CLI on a single screen. See what each agent is doing in real time, organize sessions into groups, and jump straight to a session's terminal in one click.
 
-<!-- TODO: add docs/dashboard.png once a clean screenshot is available -->
+<!-- TODO: add docs/hero.gif once produced -->
 
 ---
 
 ## Why
 
-If you run more than one Claude Code session, you quickly lose track:
+If you run more than one CLI agent at a time, you quickly lose track:
 
 - Which session is working on what repo?
-- Is session 3 actively generating code right now, or idle waiting for you?
+- Is session 3 actively working right now, or idle waiting for you?
 - What tool is that long-running session stuck on?
+- Which of my dozen terminal tabs is the session I need?
 - How do I group related sessions (e.g. frontend + backend workers) visually?
 
 `sessions-dashboard` gives you a live, at-a-glance view:
 
-- 🟢 **`working`** — Claude is producing output right now
+- 🟢 **`working`** — the agent is producing output right now
 - 🟣 **`running bash..`** — a tool is executing (you see which one)
 - ⚪ **`idle 2m`** — done, waiting for your next prompt
 - **Drag-and-drop groups** — organize sessions into named columns that persist across restarts
-- **Inline rename, live counters, uptime, cwd** — every card tells you exactly what that session is doing without alt-tabbing
-
-Plus, because all sessions share a browser under the hood, any session can open a webview that every other session can script — useful for coordinated debugging flows.
+- **One-click focus (macOS)** — jump from a card to the corresponding terminal tab
+- **Shared browser** — any session can open a webview every other session can script (useful for coordinated debugging)
 
 ---
 
@@ -35,7 +35,7 @@ Plus, because all sessions share a browser under the hood, any session can open 
 npx -y sessions-dashboard install
 ```
 
-Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of those three CLIs are on your PATH and registers `sessions-dashboard` with each one — single `claude` user gets a Claude registration, all three get all three registered, none gets a clear error.
+Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of those three CLIs are on your PATH and registers `sessions-dashboard` with each one. One CLI installed → one registration; all three → three registrations; none → clear error pointing you at the manual config snippets below.
 
 The first run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant. After that, restart your CLI(s) and in any session ask:
 
@@ -51,21 +51,21 @@ If you're forking the repo and want your local checkout registered with your CLI
 
 **macOS / Linux**
 ```bash
-git clone https://github.com/channyzf6/broccoli sessions-dashboard
+git clone https://github.com/channyzf6/sessions-dashboard
 cd sessions-dashboard
 bash bin/install.sh
 ```
 
 **Windows PowerShell**
 ```powershell
-git clone https://github.com/channyzf6/broccoli sessions-dashboard
+git clone https://github.com/channyzf6/sessions-dashboard
 cd sessions-dashboard
 powershell -ExecutionPolicy Bypass -File bin\install.ps1
 ```
 
 **Windows cmd.exe** (hands off to PowerShell internally)
 ```cmd
-git clone https://github.com/channyzf6/broccoli sessions-dashboard
+git clone https://github.com/channyzf6/sessions-dashboard
 cd sessions-dashboard
 bin\install.bat
 ```
@@ -167,23 +167,23 @@ Each card shows a live pill:
 
 | Pill | Meaning |
 |---|---|
-| 🟢 `working` | Claude is producing output — text, thinking tokens, or about to dispatch a tool |
+| 🟢 `working` | The agent is producing output — text, thinking tokens, or about to dispatch a tool |
 | 🟣 `running bash..`, `running sessions-dashboard·screenshot..` | A tool is executing. The tool name is surfaced |
 | ⚪ `idle 2m` | Assistant finished its turn, waiting for your next prompt |
 
-The state is derived from the session's JSONL log (tail-state tracking). Long-running tools stay accurately marked as `running` — no 60-second false-idle.
+The state is derived from each session's transcript (tail-state tracking against the host CLI's chat log). Long-running tools stay accurately marked as `running` — no 60-second false-idle.
 
 ### Name your sessions
 
-Sessions default to their cwd. Give them nicer names three ways:
+Sessions default to their cwd's basename. Give them nicer names three ways:
 
-- **Env var before launching:** `CLAUDE_SESSION_NAME=frontend-worker claude`
-- **`/rename` slash command** inside the session — auto-picked up within 15 s
-- **`set_session_name` tool** — Claude can call it programmatically
+- **Env var before launching:** `SESSIONS_DASHBOARD_SESSION_NAME=frontend-worker claude` (works for any host; `CLAUDE_SESSION_NAME` is a Claude-era alias)
+- **`/rename` slash command** inside the session — auto-picked up within 15 s. Supported in Claude Code and Codex CLI; **Gemini CLI has no `/rename` equivalent**, so use the env var or the `set_session_name` tool below.
+- **`set_session_name` tool** — your CLI agent can call it programmatically (works for every host)
 
 ### Group them
 
-Drag cards between groups in the dashboard. Groups match by **cwd** or **session name** — stable identifiers that survive CC restarts. Click `+ New group` to add one; click the name to rename inline; `delete` twice to remove.
+Drag cards between groups in the dashboard. Groups match by **cwd** or **session name** — stable identifiers that survive CLI restarts. Click `+ New group` to add one; click the name to rename inline; `delete` twice to remove.
 
 ### Share a browser across sessions
 
@@ -191,7 +191,7 @@ Under the hood, one Chromium instance serves all sessions. Session A can open `h
 
 ### Focus a session's terminal (macOS only)
 
-Each session card has a small `↗` button on its right side. Click it to bring that session's terminal window to the foreground with the correct tab selected — typing lands straight in the CC/Gemini prompt. Useful when the dashboard shows something finished and you need to jump to it.
+Each session card has a small `↗` button on its right side. Click it to bring that session's terminal window to the foreground with the correct tab selected — typing lands straight in the agent's prompt (Claude / Gemini / Codex, whichever the card is). Useful when the dashboard shows something finished and you need to jump to it.
 
 Supported on macOS with Terminal.app, iTerm2, and tmux running inside either. Other terminals (WezTerm, Kitty, VS Code integrated terminal, ...) show a toast with the session's pid so you can Cmd-Tab manually. Windows and Linux daemons hide the button entirely (capability-gated).
 
@@ -225,23 +225,32 @@ The last six are the shared-browser primitives — general-purpose, not dashboar
 | Env var | Default | Purpose |
 |---|---|---|
 | `SESSIONS_DASHBOARD_PORT` | `8787` | Port the daemon binds to on loopback. All sessions must agree. |
-| `SESSIONS_DASHBOARD_AUTOSTART` | unset | Set to `1` to register this session at startup, so it appears in the dashboard before any tool is invoked. |
-| `SESSIONS_DASHBOARD_HOST` | auto | `claude` or `gemini`. When unset, detected from which host's transcript dir matches the cwd. |
+| `SESSIONS_DASHBOARD_AUTOSTART` | unset | Set to `1` to register this session at startup, so it appears in the dashboard before any tool is invoked. The installer doesn't set this by default — opt in if you want eager registration. |
+| `SESSIONS_DASHBOARD_HOST` | auto | `claude`, `gemini`, or `codex`. When unset, detected by probing each host's transcript dir for one matching this cwd. The installer pins this per registration so the probe is bypassed. |
 | `SESSIONS_DASHBOARD_SESSION_NAME` | unset | Sticky display name for this session (cross-host). |
 | `CLAUDE_SESSION_NAME` | unset | Claude-era alias for `SESSIONS_DASHBOARD_SESSION_NAME`. |
 
-Set in the MCP server's `env` block in `settings.json`:
+Set in the MCP server's `env` block. For Claude Code / Gemini CLI (`~/.claude/settings.json` or `~/.gemini/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "sessions-dashboard": {
-      "command": "node",
-      "args": ["<path>/index.mjs"],
+      "command": "npx",
+      "args": ["-y", "sessions-dashboard"],
       "env": { "SESSIONS_DASHBOARD_AUTOSTART": "1" }
     }
   }
 }
+```
+
+For Codex CLI (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.sessions-dashboard]
+command = "npx"
+args = ["-y", "sessions-dashboard"]
+env = { SESSIONS_DASHBOARD_AUTOSTART = "1" }
 ```
 
 `SESSIONS_DASHBOARD_AUTOSTART=1` is recommended — it ensures every session shows up in the dashboard without you having to manually invoke a tool first.
@@ -260,17 +269,18 @@ Set in the MCP server's `env` block in `settings.json`:
 ## Architecture
 
 ```
-session A ──┐
-            ├── MCP stdio ──► index.mjs (proxy) ──► HTTP 127.0.0.1:8787 ──┐
-session B ──┘                                                             │
-                                                                          ▼
-                                                             daemon.mjs ──► Chromium
-                                                                          │
-                                                          sessions.html  ─┘ (polls /sessions)
+claude session ──┐
+gemini session ──┼── MCP stdio ──► sessions-dashboard ──► HTTP 127.0.0.1:8787 ──┐
+codex session  ──┘                 (proxy: index.mjs)                           │
+                                                                                ▼
+                                                                   daemon.mjs ──► Chromium
+                                                                                │
+                                                                sessions.html  ─┘ (polls /sessions)
 ```
 
-- **`index.mjs`** — one MCP proxy per CC session. Spawns the daemon on first use; heartbeats every 5 s; incrementally scans this session's JSONL log to report activity.
-- **`daemon.mjs`** — long-lived HTTP server on `127.0.0.1:8787`. Owns the single Chromium instance. Survives CC restarts.
+- **`bin/sessions-dashboard.mjs`** — the npm-published binary. Subcommand dispatcher (install / uninstall / version / help). With no subcommand, falls through to `index.mjs` to run the MCP server (this is what each CLI's MCP config invokes).
+- **`index.mjs`** — one MCP proxy per CLI session. Spawns the daemon on first use; heartbeats every 5 s; incrementally scans this session's transcript to report activity.
+- **`daemon.mjs`** — long-lived HTTP server on `127.0.0.1:8787`. Owns the single Chromium instance. Survives individual CLI restarts.
 - **`data/sessions.html`** — the dashboard. Polls `/sessions` every 2 s.
 
 The daemon is loopback-only, resource-capped (max 50 sessions, 20 webviews), and races cleanly — concurrent spawns hit `EADDRINUSE` and exit.
@@ -281,6 +291,6 @@ See [PUBLISHING.md](PUBLISHING.md) for maintainer notes.
 
 ## Contributing
 
-Issues and PRs welcome at <https://github.com/channyzf6/broccoli>.
+Issues and PRs welcome at <https://github.com/channyzf6/sessions-dashboard>.
 
 Built on Playwright. No runtime deps beyond Node 18+ and `@modelcontextprotocol/sdk`.
