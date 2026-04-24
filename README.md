@@ -27,137 +27,6 @@ If you run more than one CLI agent at a time, you quickly lose track:
 
 ---
 
-## Install
-
-### One-line install (recommended — macOS / Linux / Windows)
-
-```bash
-npx -y sessions-dashboard install
-```
-
-Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of those three CLIs are on your PATH and registers `sessions-dashboard` with each one. One CLI installed → one registration; all three → three registrations; none → clear error pointing you at the manual config snippets below.
-
-The first run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant. After that, restart your CLI(s) and in any session ask:
-
-> *"Open the sessions dashboard"*
-
-Your CLI invokes `mcp__sessions-dashboard__open_dashboard` and a live window appears showing every connected session across all registered CLIs.
-
-To remove the MCP registrations later: `npx -y sessions-dashboard uninstall`.
-
-### From source (contributors)
-
-If you're forking the repo and want your local checkout registered with your CLIs (instead of the published npm version):
-
-**macOS / Linux**
-```bash
-git clone https://github.com/channyzf6/sessions-dashboard
-cd sessions-dashboard
-bash bin/install.sh
-```
-
-**Windows PowerShell**
-```powershell
-git clone https://github.com/channyzf6/sessions-dashboard
-cd sessions-dashboard
-powershell -ExecutionPolicy Bypass -File bin\install.ps1
-```
-
-**Windows cmd.exe** (hands off to PowerShell internally)
-```cmd
-git clone https://github.com/channyzf6/sessions-dashboard
-cd sessions-dashboard
-bin\install.bat
-```
-
-These shims do `npm install` (downloads Chromium) and then run `node bin/sessions-dashboard.mjs install --local`, which registers a `node <local-path>` invocation against your working tree rather than `npx -y sessions-dashboard@<version>`.
-
-### Per-CLI install (manual)
-
-Skip this section if you used the npx one-liner above — it auto-handles all three. This is for users hand-editing their CLI config files.
-
-All three CLIs register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph, so the visual stays uncluttered when you don't care which CLI is which. Pin `SESSIONS_DASHBOARD_HOST` in each registration's env to make host detection deterministic — without it a cold-start dir-probe race can mis-route mixed-host sessions.
-
-**Claude Code**
-
-```bash
-claude mcp add sessions-dashboard --scope user --env SESSIONS_DASHBOARD_HOST=claude -- npx -y sessions-dashboard
-```
-
-Or `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "sessions-dashboard": {
-      "command": "npx",
-      "args": ["-y", "sessions-dashboard"],
-      "env": { "SESSIONS_DASHBOARD_HOST": "claude" }
-    }
-  }
-}
-```
-
-**Gemini CLI**
-
-```bash
-gemini mcp add --scope user sessions-dashboard --env SESSIONS_DASHBOARD_HOST=gemini -- npx -y sessions-dashboard
-```
-
-Or `~/.gemini/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "sessions-dashboard": {
-      "command": "npx",
-      "args": ["-y", "sessions-dashboard"],
-      "env": {
-        "SESSIONS_DASHBOARD_AUTOSTART": "1",
-        "SESSIONS_DASHBOARD_HOST": "gemini"
-      }
-    }
-  }
-}
-```
-
-Gemini CLI has no `/rename` slash command — name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the session.
-
-**Codex CLI**
-
-```bash
-codex mcp add sessions-dashboard --env SESSIONS_DASHBOARD_HOST=codex -- npx -y sessions-dashboard
-```
-
-Codex's `mcp add` is global by default and doesn't accept `--scope`.
-
-Or `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.sessions-dashboard]
-command = "npx"
-args = ["-y", "sessions-dashboard"]
-env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
-```
-
-Restart your CLI after registration; tools appear as `mcp__sessions-dashboard__*`.
-
-### Notes & caveats
-
-**Codex activity pill in Limited persistence mode.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events, so the activity pill can only show `working` (between a user message and the next `task_complete`) and `idle <duration>` after the task completes — tool names are never surfaced. To get the violet `running <tool>..` pill, set Codex to Extended persistence (the relevant config key has shifted between Codex versions; check `codex config schema`). The dashboard still works in Limited mode — it just won't surface tool names.
-
-**Codex on Windows.** Codex's official Windows support runs through WSL2, but the native Windows build (transcripts under `%USERPROFILE%\.codex\sessions\`) works in practice — sessions-dashboard's transcript scanner and `/rename` detection both function on native Windows. Use whichever fits your workflow.
-
-### Compatibility matrix
-
-| Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
-|---|---|---|---|---|
-| Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
-| Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
-| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool name at all) | ✅ `/rename` |
-
----
-
 ## Quick tour
 
 ### Open the dashboard
@@ -206,24 +75,27 @@ First use triggers a one-time macOS automation-permission prompt asking to let `
 
 ---
 
-## Tools
+## Install
 
-All tools prefixed `mcp__sessions-dashboard__`:
+```bash
+npx -y sessions-dashboard install
+```
 
-| Tool | Purpose |
-|---|---|
-| `open_dashboard` | Open a registered dashboard (e.g. `sessions`). The main entry point. |
-| `list_dashboards` | List registered dashboards from `data/dashboards.json`. |
-| `set_session_name` | Set or clear this session's display name. |
-| `daemon_info` | `{ pid, port, uptime, webviews, sessions }` — diagnostics. |
-| `open_webview` | Open a named browser window with a URL or HTML. |
-| `update_webview` | Navigate an already-open window. |
-| `eval_js` | Run JS in a named window; return JSON-serialized result. |
-| `screenshot` | PNG of a named window. `fullPage: true` for full scroll height. |
-| `close_webview` | Close a window. Other windows + the browser stay alive. |
-| `list_webviews` | Enumerate open windows — `{ name, url, title, startedAt }`. |
+Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of the three CLIs are on your PATH and registers `sessions-dashboard` with each. First run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant.
 
-The last six are the shared-browser primitives — general-purpose, not dashboard-specific.
+After install, restart your CLI(s) and ask any session: *"Open the sessions dashboard."*
+
+To remove the MCP registrations later: `npx -y sessions-dashboard uninstall`.
+
+For installing from source (contributors), per-CLI manual config, and platform-specific caveats (Codex on Windows / Limited persistence mode), see [docs/INSTALL.md](docs/INSTALL.md).
+
+### Compatibility matrix
+
+| Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
+|---|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
+| Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool name at all) | ✅ `/rename` |
 
 ---
 
@@ -237,30 +109,13 @@ The last six are the shared-browser primitives — general-purpose, not dashboar
 | `SESSIONS_DASHBOARD_SESSION_NAME` | unset | Sticky display name for this session (cross-host). |
 | `CLAUDE_SESSION_NAME` | unset | Claude-era alias for `SESSIONS_DASHBOARD_SESSION_NAME`. |
 
-Set in the MCP server's `env` block. For Claude Code / Gemini CLI (`~/.claude/settings.json` or `~/.gemini/settings.json`):
+Set these in the MCP server's `env` block in your CLI's config file — see [docs/INSTALL.md](docs/INSTALL.md#per-cli-manual-install) for the per-CLI config syntax (Claude / Gemini settings.json, Codex config.toml). `SESSIONS_DASHBOARD_AUTOSTART=1` is recommended — it ensures every session shows up in the dashboard without you having to manually invoke a tool first.
 
-```json
-{
-  "mcpServers": {
-    "sessions-dashboard": {
-      "command": "npx",
-      "args": ["-y", "sessions-dashboard"],
-      "env": { "SESSIONS_DASHBOARD_AUTOSTART": "1" }
-    }
-  }
-}
-```
+---
 
-For Codex CLI (`~/.codex/config.toml`):
+## Tools
 
-```toml
-[mcp_servers.sessions-dashboard]
-command = "npx"
-args = ["-y", "sessions-dashboard"]
-env = { SESSIONS_DASHBOARD_AUTOSTART = "1" }
-```
-
-`SESSIONS_DASHBOARD_AUTOSTART=1` is recommended — it ensures every session shows up in the dashboard without you having to manually invoke a tool first.
+The MCP entry point is `mcp__sessions-dashboard__open_dashboard`. The package also exports nine other tools for shared-browser scripting (`open_webview`, `eval_js`, `screenshot`, …) — see [docs/TOOLS.md](docs/TOOLS.md) for the full reference.
 
 ---
 
@@ -285,14 +140,7 @@ codex session  ──┘                 (proxy: index.mjs)                     
                                                                 sessions.html  ─┘ (polls /sessions)
 ```
 
-- **`bin/sessions-dashboard.mjs`** — the npm-published binary. Subcommand dispatcher (install / uninstall / version / help). With no subcommand, falls through to `index.mjs` to run the MCP server (this is what each CLI's MCP config invokes).
-- **`index.mjs`** — one MCP proxy per CLI session. Spawns the daemon on first use; heartbeats every 5 s; incrementally scans this session's transcript to report activity.
-- **`daemon.mjs`** — long-lived HTTP server on `127.0.0.1:8787`. Owns the single Chromium instance. Survives individual CLI restarts.
-- **`data/sessions.html`** — the dashboard. Polls `/sessions` every 2 s.
-
-The daemon is loopback-only, resource-capped (max 50 sessions, 20 webviews), and races cleanly — concurrent spawns hit `EADDRINUSE` and exit.
-
-See [PUBLISHING.md](PUBLISHING.md) for maintainer notes.
+One MCP proxy per CLI session, all talking to a single long-lived daemon that owns the Chromium browser. The daemon is loopback-only, resource-capped (max 50 sessions, 20 webviews), and survives individual CLI restarts.
 
 ---
 
