@@ -1,16 +1,23 @@
 {
-  "name": "sessions-dashboard-mcp",
-  "version": "0.3.0",
-  "description": "A live dashboard for every Claude Code session you're running. See activity in real time, organize sessions into groups, and share a browser across sessions.",
+  "name": "sessions-dashboard",
+  "version": "0.4.0",
+  "description": "A live dashboard for every Claude Code / Gemini CLI / Codex CLI session you're running. See activity in real time, organize sessions into groups, and share a browser across sessions.",
   "type": "module",
   "main": "index.mjs",
   "bin": {
-    "sessions-dashboard-mcp": "./index.mjs",
-    "sessions-dashboard-daemon": "./daemon.mjs"
+    "sessions-dashboard": "./bin/sessions-dashboard.mjs"
   },
+  "files": [
+    "bin/sessions-dashboard.mjs",
+    "index.mjs",
+    "daemon.mjs",
+    "lib/",
+    "data/",
+    "README.md"
+  ],
   "scripts": {
-    "start": "node index.mjs",
-    "daemon": "node daemon.mjs",
+    "start": "node bin/sessions-dashboard.mjs",
+    "test": "node --test lib/host/",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
@@ -19,5 +26,18 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/channyzf6/broccoli.git"
+  },
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "gemini-cli",
+    "codex-cli",
+    "dashboard",
+    "agent-observability"
+  ],
+  "license": "MIT"
 }

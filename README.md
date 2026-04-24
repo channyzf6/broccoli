@@ -29,13 +29,31 @@ Plus, because all sessions share a browser under the hood, any session can open 
 
 ## Install
 
-Heads up: first `npm install` downloads Chromium via Playwright (~150 MB, 30–60 s). Hang tight.
+### One-line install (recommended — macOS / Linux / Windows)
 
-### One-command install
+```bash
+npx -y sessions-dashboard install
+```
+
+Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of those three CLIs are on your PATH and registers `sessions-dashboard` with each one — single `claude` user gets a Claude registration, all three get all three registered, none gets a clear error.
+
+The first run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant. After that, restart your CLI(s) and in any session ask:
+
+> *"Open the sessions dashboard"*
+
+Your CLI invokes `mcp__sessions-dashboard__open_dashboard` and a live window appears showing every connected session across all registered CLIs.
+
+To remove the MCP registrations later: `npx -y sessions-dashboard uninstall`.
+
+### From source (contributors)
+
+If you're forking the repo and want your local checkout registered with your CLIs (instead of the published npm version):
 
 **macOS / Linux**
 ```bash
-git clone https://github.com/channyzf6/broccoli sessions-dashboard && cd sessions-dashboard && bash bin/install.sh
+git clone https://github.com/channyzf6/broccoli sessions-dashboard
+cd sessions-dashboard
+bash bin/install.sh
 ```
 
 **Windows PowerShell**
@@ -52,54 +70,53 @@ cd sessions-dashboard
 bin\install.bat
 ```
 
-The script auto-detects which supported CLIs are on your PATH (Claude Code, Gemini CLI, Codex CLI) and registers the MCP server with each one. So a user with only Gemini gets Gemini-registered, a user with all three gets all three registered, and a user with none gets a clear error pointing them at the manual flow. Restart your CLI(s), then in any session ask:
+These shims do `npm install` (downloads Chromium) and then run `node bin/sessions-dashboard.mjs install --local`, which registers a `node <local-path>` invocation against your working tree rather than `npx -y sessions-dashboard@<version>`.
 
-> *"Open the sessions dashboard"*
+### Manual install (per CLI)
 
-Your CLI invokes `mcp__sessions-dashboard__open_dashboard` and a live window appears showing every connected session across all registered CLIs.
-
-### Manual install
+If you'd rather not use the installer at all and prefer to register each CLI by hand:
 
 ```bash
-git clone https://github.com/channyzf6/broccoli sessions-dashboard
-cd sessions-dashboard
-npm install
-claude mcp add sessions-dashboard --scope user -- node "$(pwd)/index.mjs"
+# Claude Code
+claude mcp add sessions-dashboard --scope user --env SESSIONS_DASHBOARD_HOST=claude -- npx -y sessions-dashboard
+
+# Gemini CLI
+gemini mcp add --scope user sessions-dashboard --env SESSIONS_DASHBOARD_HOST=gemini -- npx -y sessions-dashboard
+
+# Codex CLI (note: --scope is unsupported here, mcp add is global by default)
+codex mcp add sessions-dashboard --env SESSIONS_DASHBOARD_HOST=codex -- npx -y sessions-dashboard
 ```
 
-Or edit `~/.claude/settings.json` directly:
+Or edit each CLI's settings file directly. For Claude (`~/.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "sessions-dashboard": {
-      "command": "node",
-      "args": ["<absolute path>/index.mjs"]
+      "command": "npx",
+      "args": ["-y", "sessions-dashboard"],
+      "env": { "SESSIONS_DASHBOARD_HOST": "claude" }
     }
   }
 }
 ```
 
-On Windows, use something like `C:\\Users\\<username>\\code\\sessions-dashboard\\index.mjs` (note the escaped backslashes). Restart Claude Code. Tools appear as `mcp__sessions-dashboard__*`.
+Pinning the host via `SESSIONS_DASHBOARD_HOST` makes detection deterministic and skips a cold-start dir-probe race that otherwise mis-routes mixed-host sessions. Restart your CLI; tools appear as `mcp__sessions-dashboard__*`.
 
-### Gemini CLI
+### Per-CLI notes
 
-Gemini CLI is supported in addition to Claude Code — both hosts can register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph, so the visual stays uncluttered when you don't care which CLI is which.
+All three CLIs (Claude Code, Gemini CLI, Codex CLI) register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph, so the visual stays uncluttered when you don't care which CLI is which.
 
-Register via the CLI:
+The npx one-liner registers all three automatically; this section is for users hand-editing their config files or who want to see the per-CLI config syntax.
 
-```bash
-gemini mcp add --scope user sessions-dashboard node "<absolute path>/index.mjs"
-```
-
-Or edit `~/.gemini/settings.json`:
+**Gemini** writes to `~/.gemini/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "sessions-dashboard": {
-      "command": "node",
-      "args": ["<absolute path>/index.mjs"],
+      "command": "npx",
+      "args": ["-y", "sessions-dashboard"],
       "env": {
         "SESSIONS_DASHBOARD_AUTOSTART": "1",
         "SESSIONS_DASHBOARD_HOST": "gemini"
@@ -109,26 +126,16 @@ Or edit `~/.gemini/settings.json`:
 }
 ```
 
-`SESSIONS_DASHBOARD_HOST=gemini` tells the proxy which host scraping strategy to use; if omitted, the proxy auto-detects from cwd. Gemini CLI has no `/rename` slash command, so name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the Gemini session.
+Gemini CLI has no `/rename` slash command, so name a session via `SESSIONS_DASHBOARD_SESSION_NAME` in the env block or by calling `set_session_name` from inside the Gemini session.
 
-### Codex CLI
-
-Register via the CLI:
-
-```bash
-codex mcp add sessions-dashboard -- node "<absolute path>/index.mjs"
-```
-
-Or edit `~/.codex/config.toml`:
+**Codex** writes to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.sessions-dashboard]
-command = "node"
-args = ["<absolute path>/index.mjs"]
+command = "npx"
+args = ["-y", "sessions-dashboard"]
 env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
 ```
-
-`SESSIONS_DASHBOARD_HOST=codex` tells the proxy which host scraping strategy to use; if omitted, auto-detection reads `~/.codex/sessions/<today-or-yesterday>/rollout-*.jsonl` first lines and matches on cwd.
 
 **Activity-pill caveat — set Codex to "Extended" persistence for full granularity.** Codex's default rollout-persistence mode (Limited) skips `*_begin` events (`task_started`, `exec_command_begin`, `mcp_tool_call_begin`). In Limited mode the activity pill can only show `working` (between a user message and the next `task_complete`) and `idle <duration>` after the task completes — tool names are never surfaced because the adapter has no signal for "tool currently executing." To enable Extended mode, edit `~/.codex/config.toml` per the Codex docs (the relevant key has shifted between Codex versions; check `codex config schema`). When unsure, the dashboard still works in Limited mode — it just won't surface tool names.
 
