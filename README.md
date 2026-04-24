@@ -6,6 +6,22 @@
 
 ---
 
+## Install
+
+```bash
+npx -y sessions-dashboard install
+```
+
+Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of the three CLIs are on your PATH and registers `sessions-dashboard` with each. First run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant.
+
+After install, restart your CLI(s) and ask any session: *"Open the sessions dashboard."*
+
+To remove the MCP registrations later: `npx -y sessions-dashboard uninstall`.
+
+For installing from source (contributors), per-CLI manual config, and platform-specific caveats (Codex on Windows / Limited persistence mode), see [docs/INSTALL.md](docs/INSTALL.md).
+
+---
+
 ## Why
 
 If you run more than one CLI agent at a time, you quickly lose track:
@@ -75,27 +91,13 @@ First use triggers a one-time macOS automation-permission prompt asking to let `
 
 ---
 
-## Install
-
-```bash
-npx -y sessions-dashboard install
-```
-
-Requires Node ≥18 on PATH (already true if you're running Claude Code, Gemini CLI, or Codex CLI). The installer auto-detects which of the three CLIs are on your PATH and registers `sessions-dashboard` with each. First run pre-fetches Playwright's Chromium (~150 MB) so the first dashboard open is instant.
-
-After install, restart your CLI(s) and ask any session: *"Open the sessions dashboard."*
-
-To remove the MCP registrations later: `npx -y sessions-dashboard uninstall`.
-
-For installing from source (contributors), per-CLI manual config, and platform-specific caveats (Codex on Windows / Limited persistence mode), see [docs/INSTALL.md](docs/INSTALL.md).
-
 ### Compatibility matrix
 
 | Host | Cards + drag/drop | Tools | Live activity pill | In-transcript rename |
 |---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ `/rename` |
-| Gemini CLI | ✅ | ✅ | ✅ | ❌ (use env var or `set_session_name` tool) |
-| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool name at all) | ✅ `/rename` |
+| Gemini CLI | ✅ | ✅ | ✅ | 🟡 (`/rename` not built-in, but should work in practice; else, env var or `set_session_name` tool) |
+| Codex CLI | ✅ | ✅ | ✅ Extended mode (Limited shows working/idle only — no tool names) | ✅ `/rename` |
 
 ---
 
