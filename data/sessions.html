@@ -3,12 +3,31 @@
 <head>
 <meta charset="utf-8" />
 <title>Sessions Dashboard</title>
+<script>
+  // Theme bootstrap — runs before <style> parses to prevent FOUC.
+  // Mirrors getInitialChoice() in data/theme.mjs. Default "current" preserves
+  // the dashboard's pre-toggle appearance for users with empty localStorage.
+  (() => {
+    let stored = null;
+    try { stored = localStorage.getItem("sessions-dashboard-theme"); } catch (_) {}
+    const choice = stored === "current" || stored === "dark" || stored === "light"
+      ? stored : "current";
+    document.documentElement.setAttribute("data-theme", choice);
+    document.documentElement.setAttribute("data-theme-choice", choice);
+  })();
+</script>
 <style>
   :root {
     --bg: #0b1020;
+    --bg-accent-1: #1a2551;
+    --bg-accent-2: #331a51;
     --panel: rgba(255,255,255,.035);
     --panel-hi: rgba(255,255,255,.06);
+    --surface-lo: rgba(255,255,255,.02);
+    --surface-mid: rgba(255,255,255,.05);
     --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.22);
+    --border-strong-hi: rgba(255,255,255,.45);
     --text: #e5ebf5;
     --dim: #8a94ad;
     --green: #4ade80;
@@ -17,17 +36,131 @@
     --gold: #f5c13a;
     --violet: #c084fc;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --card-bg: rgba(0,0,0,.22);
+    --card-bg-hover: rgba(255,255,255,.025);
+    --card-border-hover: rgba(96,165,250,.4);
+    --state-fresh-border: rgba(74,222,128,.5);
+    --state-idle-border: rgba(245,193,58,.4);
+    --flash-save: rgba(74,222,128,.20);
+    --flash-revert: rgba(245,193,58,.20);
+    --danger-tint: rgba(248,113,113,.08);
+    --danger-tint-hi: rgba(248,113,113,.15);
+    --danger-border: rgba(248,113,113,.4);
+    --danger-border-hi: rgba(248,113,113,.6);
+    --blue-tint: rgba(96,165,250,.06);
+    --blue-tint-hi: rgba(96,165,250,.16);
+    --blue-border-hi: rgba(96,165,250,.35);
+    --blue-focus-ring: rgba(96,165,250,.55);
+    --cta-text: #0b1020;
+    --cta-bg-hover: #7db7ff;
+    --cta-bg-tint: rgba(96,165,250,.04);
+    --cta-border: rgba(96,165,250,.5);
+    --cta-shadow: rgba(96,165,250,.25);
+    --cta-shadow-hi: rgba(96,165,250,.4);
+    --pill-running-bg: rgba(192,132,252,.14);
+    --pill-running-border: rgba(192,132,252,.35);
+    --pill-running-glow: rgba(192,132,252,.6);
+    --pill-thinking-bg: rgba(74,222,128,.14);
+    --pill-thinking-border: rgba(74,222,128,.35);
+    --pill-thinking-glow: rgba(74,222,128,.6);
+    --pill-idle-bg: rgba(138,148,173,.10);
+    --pill-idle-border: rgba(138,148,173,.25);
+    --daemon-glow: rgba(74,222,128,.35);
+    --daemon-glow-dim: rgba(74,222,128,.15);
+    --daemon-glow-off: rgba(248,113,113,.35);
+    --locator-detached: #fb923c;
+    --toast-bg: rgba(12,16,28,.95);
+    --toast-shadow: rgba(0,0,0,.35);
+    --toast-warn-border: rgba(245,193,58,.45);
+  }
+  [data-theme="dark"] {
+    --bg: #06080f;
+    --bg-accent-1: #131e3d;
+    --bg-accent-2: #251536;
+    --panel: rgba(255,255,255,.05);
+    --panel-hi: rgba(255,255,255,.09);
+    --surface-lo: rgba(255,255,255,.03);
+    --surface-mid: rgba(255,255,255,.07);
+    --border: rgba(255,255,255,.14);
+    --border-strong: rgba(255,255,255,.32);
+    --border-strong-hi: rgba(255,255,255,.55);
+    --text: #f1f5fb;
+    --dim: #98a3bd;
+    --card-bg: rgba(0,0,0,.35);
+    --card-bg-hover: rgba(255,255,255,.04);
+    --pill-running-bg: rgba(192,132,252,.20);
+    --pill-running-border: rgba(192,132,252,.50);
+    --pill-thinking-bg: rgba(74,222,128,.20);
+    --pill-thinking-border: rgba(74,222,128,.50);
+    --pill-idle-bg: rgba(152,163,189,.14);
+    --pill-idle-border: rgba(152,163,189,.32);
+    --toast-bg: rgba(6,8,15,.96);
+  }
+  [data-theme="light"] {
+    --bg: #f6f7fb;
+    --bg-accent-1: #dde6ff;
+    --bg-accent-2: #ecdcff;
+    --panel: rgba(15,23,42,.04);
+    --panel-hi: rgba(15,23,42,.08);
+    --surface-lo: rgba(15,23,42,.03);
+    --surface-mid: rgba(15,23,42,.06);
+    --border: rgba(15,23,42,.12);
+    --border-strong: rgba(15,23,42,.30);
+    --border-strong-hi: rgba(15,23,42,.55);
+    --text: #0f172a;
+    --dim: #5b6478;
+    --green: #15803d;
+    --red: #b91c1c;
+    --blue: #2563eb;
+    --gold: #b45309;
+    --violet: #7c3aed;
+    --card-bg: rgba(255,255,255,.7);
+    --card-bg-hover: rgba(15,23,42,.04);
+    --card-border-hover: rgba(37,99,235,.4);
+    --state-fresh-border: rgba(21,128,61,.55);
+    --state-idle-border: rgba(180,83,9,.45);
+    --flash-save: rgba(21,128,61,.18);
+    --flash-revert: rgba(180,83,9,.18);
+    --danger-tint: rgba(185,28,28,.08);
+    --danger-tint-hi: rgba(185,28,28,.14);
+    --danger-border: rgba(185,28,28,.45);
+    --danger-border-hi: rgba(185,28,28,.65);
+    --blue-tint: rgba(37,99,235,.08);
+    --blue-tint-hi: rgba(37,99,235,.16);
+    --blue-border-hi: rgba(37,99,235,.4);
+    --blue-focus-ring: rgba(37,99,235,.55);
+    --cta-text: #ffffff;
+    --cta-bg-hover: #1d4ed8;
+    --cta-bg-tint: rgba(37,99,235,.06);
+    --cta-border: rgba(37,99,235,.5);
+    --cta-shadow: rgba(37,99,235,.25);
+    --cta-shadow-hi: rgba(37,99,235,.4);
+    --pill-running-bg: rgba(124,58,237,.10);
+    --pill-running-border: rgba(124,58,237,.40);
+    --pill-running-glow: rgba(124,58,237,.45);
+    --pill-thinking-bg: rgba(21,128,61,.10);
+    --pill-thinking-border: rgba(21,128,61,.40);
+    --pill-thinking-glow: rgba(21,128,61,.45);
+    --pill-idle-bg: rgba(91,100,120,.08);
+    --pill-idle-border: rgba(91,100,120,.25);
+    --daemon-glow: rgba(21,128,61,.35);
+    --daemon-glow-dim: rgba(21,128,61,.15);
+    --daemon-glow-off: rgba(185,28,28,.35);
+    --locator-detached: #c2410c;
+    --toast-bg: rgba(248,249,253,.97);
+    --toast-shadow: rgba(15,23,42,.18);
+    --toast-warn-border: rgba(180,83,9,.45);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: radial-gradient(900px 600px at 10% -10%, #1a2551 0%, transparent 60%),
-                radial-gradient(700px 500px at 90% -20%, #331a51 0%, transparent 55%),
+    background: radial-gradient(900px 600px at 10% -10%, var(--bg-accent-1) 0%, transparent 60%),
+                radial-gradient(700px 500px at 90% -20%, var(--bg-accent-2) 0%, transparent 55%),
                 var(--bg);
     min-height: 100vh;
   }
-  header { padding: 1.8rem 2rem 1rem; border-bottom: 1px solid var(--border); }
+  header { position: relative; padding: 1.8rem 2rem 1rem; border-bottom: 1px solid var(--border); }
   h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.02em; }
   h1 .sub { color: var(--dim); font-weight: 400; font-size: .95rem; margin-left: .6rem; }
 
@@ -38,10 +171,9 @@
     padding: .9rem 1.1rem; margin-bottom: 1.2rem;
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   }
-  .status-row h3 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
   .status-row .count {
     font-family: var(--mono); font-size: .82rem; color: var(--dim);
-    background: rgba(255,255,255,.06); padding: .15rem .7rem; border-radius: 999px;
+    background: var(--panel-hi); padding: .15rem .7rem; border-radius: 999px;
   }
   /* Daemon meta: labels in sans-serif, numbers in mono — less "shell prompt" */
   .status-row .daemon-info {
@@ -58,7 +190,7 @@
   .status-dot {
     width: 13px; height: 13px; border-radius: 50%; display: inline-block;
     border: 2px solid var(--green); background: transparent; position: relative;
-    box-shadow: 0 0 12px rgba(74,222,128,.35);
+    box-shadow: 0 0 12px var(--daemon-glow);
     animation: ringPulse 3s ease-in-out infinite;
   }
   .status-dot::after {
@@ -66,11 +198,11 @@
     background: var(--green);
   }
   .status-dot.offline {
-    border-color: var(--red); box-shadow: 0 0 12px rgba(248,113,113,.35);
+    border-color: var(--red); box-shadow: 0 0 12px var(--daemon-glow-off);
     animation: none;
   }
   .status-dot.offline::after { background: var(--red); }
-  @keyframes ringPulse { 50% { box-shadow: 0 0 4px rgba(74,222,128,.15); } }
+  @keyframes ringPulse { 50% { box-shadow: 0 0 4px var(--daemon-glow-dim); } }
 
   .sessions-list {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -85,7 +217,7 @@
   .group-header {
     display: flex; align-items: center; gap: .7rem;
     padding: .55rem .9rem; margin-bottom: .55rem;
-    background: rgba(255,255,255,.02); border: 1px solid var(--border);
+    background: var(--surface-lo); border: 1px solid var(--border);
     border-left: 3px solid var(--group-color, var(--dim));
     border-radius: 8px;
   }
@@ -96,16 +228,16 @@
     font-family: inherit;
     /* Persistent dotted underline reads as "editable text" without needing
        hover discovery. Removed while focused so the edit state feels clean. */
-    text-decoration: underline dotted rgba(255,255,255,.22);
+    text-decoration: underline dotted var(--border-strong);
     text-underline-offset: 3px;
     transition: background .4s ease, text-decoration-color .15s ease;
   }
   .group-header .name:hover {
-    background: rgba(255,255,255,.05); cursor: text;
-    text-decoration-color: rgba(255,255,255,.45);
+    background: var(--surface-mid); cursor: text;
+    text-decoration-color: var(--border-strong-hi);
   }
   .group-header .name:focus {
-    background: rgba(255,255,255,.08);
+    background: var(--border);
     text-decoration: none;
   }
   /* The Ungrouped section's name is a static label, not editable. */
@@ -114,8 +246,8 @@
   }
   .group-header .name.static:hover { background: transparent; }
   /* Brief save/revert feedback flashes on the name after blur. */
-  .group-header .name.flash-save { background: rgba(74,222,128,.20); }
-  .group-header .name.flash-revert { background: rgba(245,193,58,.20); }
+  .group-header .name.flash-save { background: var(--flash-save); }
+  .group-header .name.flash-revert { background: var(--flash-revert); }
   /* Inline count: no pill — just dim text with a separator dot. Reduces
      vocabulary overlap with the daemon-level "X sessions" pill. */
   .group-header .count {
@@ -129,14 +261,14 @@
     font: inherit; font-size: .72rem; padding: .2rem .55rem; border-radius: 6px;
     cursor: pointer;
   }
-  .group-header .btn:hover { color: var(--text); border-color: rgba(255,255,255,.22); }
-  .group-header .btn.delete:hover { color: var(--red); border-color: rgba(248,113,113,.4); }
+  .group-header .btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .group-header .btn.delete:hover { color: var(--red); border-color: var(--danger-border); }
   .group-header .btn.delete.armed {
-    color: var(--red); border-color: rgba(248,113,113,.6);
-    background: rgba(248,113,113,.08);
+    color: var(--red); border-color: var(--danger-border-hi);
+    background: var(--danger-tint);
     animation: armedPulse 1.2s ease-in-out infinite;
   }
-  @keyframes armedPulse { 50% { background: rgba(248,113,113,.15); } }
+  @keyframes armedPulse { 50% { background: var(--danger-tint-hi); } }
   .group-drop {
     min-height: 48px; padding: .4rem; border-radius: 10px;
     border: 1px dashed transparent;
@@ -144,8 +276,8 @@
     gap: 1rem; list-style: none; margin: 0;
     transition: background .15s ease, border-color .15s ease;
   }
-  .group-drop.empty { border-color: rgba(255,255,255,.08); color: var(--dim); font-style: italic; align-items: center; justify-content: center; display: flex; padding: 1rem; }
-  .group-drop.drag-over { background: rgba(96,165,250,.06); border-color: rgba(96,165,250,.35); border-style: dashed; }
+  .group-drop.empty { border-color: var(--border); color: var(--dim); font-style: italic; align-items: center; justify-content: center; display: flex; padding: 1rem; }
+  .group-drop.drag-over { background: var(--blue-tint); border-color: var(--blue-border-hi); border-style: dashed; }
   /* Smaller ghost button, right-aligned; no longer competing with
      drop-zone placeholders for visual weight. */
   .new-group-btn-wrap {
@@ -157,18 +289,18 @@
     cursor: pointer; width: auto;
     transition: color .15s, border-color .15s, background .15s, box-shadow .2s;
   }
-  .new-group-btn:hover { color: var(--text); border-color: rgba(96,165,250,.5); background: rgba(96,165,250,.04); }
+  .new-group-btn:hover { color: var(--text); border-color: var(--cta-border); background: var(--cta-bg-tint); }
   /* Primary CTA treatment: promoted when there are no groups yet AND at
      least one session is live — giving new users one obvious thing to click.
      Reverts to the ghost style as soon as a group exists. */
   .new-group-btn.primary {
-    color: #0b1020; background: var(--blue); border-color: var(--blue);
+    color: var(--cta-text); background: var(--blue); border-color: var(--blue);
     font-weight: 600; padding: .45rem 1rem;
-    box-shadow: 0 2px 10px rgba(96,165,250,.25);
+    box-shadow: 0 2px 10px var(--cta-shadow);
   }
   .new-group-btn.primary:hover {
-    background: #7db7ff; border-color: #7db7ff; color: #0b1020;
-    box-shadow: 0 2px 14px rgba(96,165,250,.4);
+    background: var(--cta-bg-hover); border-color: var(--cta-bg-hover); color: var(--cta-text);
+    box-shadow: 0 2px 14px var(--cta-shadow-hi);
   }
   /* Empty state: zero sessions AND zero groups. */
   .empty-state {
@@ -186,7 +318,7 @@
   }
   .empty-state code {
     font-family: var(--mono); font-size: .82rem;
-    background: rgba(255,255,255,.06); padding: .1rem .4rem; border-radius: 4px;
+    background: var(--panel-hi); padding: .1rem .4rem; border-radius: 4px;
     color: var(--text);
   }
   /* Two-row card. Card itself is a flex-row so the status pill can sit
@@ -195,7 +327,7 @@
      already owns the left-edge color channel; a per-card stripe would
      stack against it and turn the dashboard chromatic). */
   .session {
-    background: rgba(0,0,0,.22);
+    background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: .85rem 1.05rem;
@@ -208,11 +340,11 @@
   .session.dragging { opacity: .45; }
   .session:hover {
     transform: translateY(-1px);
-    background: rgba(255,255,255,.025);
-    border-color: rgba(96,165,250,.4);
+    background: var(--card-bg-hover);
+    border-color: var(--card-border-hover);
   }
-  .session.fresh { border-color: rgba(74,222,128,.5); }
-  .session.idle  { border-color: rgba(245,193,58,.4); opacity: .9; }
+  .session.fresh { border-color: var(--state-fresh-border); }
+  .session.idle  { border-color: var(--state-idle-border); opacity: .9; }
 
   /* .body stacks ident + optional locator vertically. Takes all leftover
      horizontal space so the locator has room for long cwd/branch values. */
@@ -241,7 +373,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     opacity: .9; letter-spacing: .01em;
   }
-  .session .locator.detached { color: #fb923c; font-style: italic; }
+  .session .locator.detached { color: var(--locator-detached); font-style: italic; }
   /* Branch glyph — bumped a tick over the locator's base size so the
      ⎇ reads clearly at small sizes on every font stack. Slight opacity
      boost over the rest of the dim locator so it's the visual anchor. */
@@ -272,12 +404,12 @@
   /* "running <tool>.." — tool is dispatched, session is waiting on the tool.
      Violet conveys "agent is parked until the tool returns". */
   .session .status.running {
-    background: rgba(192,132,252,.14); color: var(--violet);
-    border: 1px solid rgba(192,132,252,.35);
+    background: var(--pill-running-bg); color: var(--violet);
+    border: 1px solid var(--pill-running-border);
   }
   .session .status.running .dot {
     background: var(--violet);
-    box-shadow: 0 0 6px rgba(192,132,252,.6);
+    box-shadow: 0 0 6px var(--pill-running-glow);
     animation: statusPulse 2.2s ease-in-out infinite;
   }
   /* "working" — assistant itself is producing output (text / tool-call
@@ -286,18 +418,18 @@
      same palette — closest semantic match to the old binary pill. */
   .session .status.thinking,
   .session .status.working {
-    background: rgba(74,222,128,.14); color: var(--green);
-    border: 1px solid rgba(74,222,128,.35);
+    background: var(--pill-thinking-bg); color: var(--green);
+    border: 1px solid var(--pill-thinking-border);
   }
   .session .status.thinking .dot,
   .session .status.working .dot {
     background: var(--green);
-    box-shadow: 0 0 6px rgba(74,222,128,.6);
+    box-shadow: 0 0 6px var(--pill-thinking-glow);
     animation: statusPulse 1.6s ease-in-out infinite;
   }
   .session .status.idle {
-    background: rgba(138,148,173,.10); color: var(--dim);
-    border: 1px solid rgba(138,148,173,.25);
+    background: var(--pill-idle-bg); color: var(--dim);
+    border: 1px solid var(--pill-idle-border);
     font-weight: 500;
   }
   .session .status.idle .dot {
@@ -329,14 +461,14 @@
   }
   .session:hover .focus-btn { opacity: .9; }
   .session .focus-btn:hover {
-    color: var(--blue); border-color: rgba(96,165,250,.35);
-    background: rgba(96,165,250,.06); opacity: 1;
+    color: var(--blue); border-color: var(--blue-border-hi);
+    background: var(--blue-tint); opacity: 1;
   }
   .session .focus-btn:focus-visible {
-    outline: 2px solid rgba(96,165,250,.55); outline-offset: 1px;
+    outline: 2px solid var(--blue-focus-ring); outline-offset: 1px;
   }
   .session .focus-btn.focus-btn-active {
-    color: var(--blue); background: rgba(96,165,250,.16); opacity: 1;
+    color: var(--blue); background: var(--blue-tint-hi); opacity: 1;
   }
 
   /* Transient toast for focus errors (and future use). Positioned fixed
@@ -344,26 +476,46 @@
   .toast {
     position: fixed;
     bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(.6rem);
-    background: rgba(12,16,28,.95); color: var(--text);
+    background: var(--toast-bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px;
     padding: .55rem .85rem; font-size: .82rem; max-width: 32rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    box-shadow: 0 10px 30px var(--toast-shadow);
     opacity: 0; pointer-events: none;
     transition: opacity .18s ease, transform .18s ease;
     z-index: 1000;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  .toast.toast-warn { border-color: rgba(245,193,58,.45); color: var(--gold); }
+  .toast.toast-warn { border-color: var(--toast-warn-border); color: var(--gold); }
+
+  /* Theme toggle: single cycling button, top-right of the header.
+     Glyph reflects the current mode; click cycles current → dark → light. */
+  .theme-toggle {
+    position: absolute; top: 1.4rem; right: 1.4rem; z-index: 1;
+    background: var(--panel-hi); color: var(--text);
+    border: 1px solid var(--border); border-radius: 999px;
+    width: 30px; height: 30px; padding: 0;
+    font-size: 14px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .theme-toggle:hover {
+    background: var(--blue-tint); border-color: var(--blue-border-hi);
+  }
+  .theme-toggle:focus-visible {
+    outline: 2px solid var(--blue-focus-ring); outline-offset: 2px;
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>Connected sessions <span class="sub">— live view of every agentic CLI session you're running</span></h1>
+  <button id="theme-toggle" type="button" class="theme-toggle"
+          title="Theme: Current (click to cycle)"
+          aria-label="Theme: Current. Click to cycle theme."></button>
 </header>
 <main>
   <div class="status-row">
     <span class="status-dot" id="daemon-dot"></span>
-    <h3>Daemon</h3>
     <span class="count" id="sessions-count">—</span>
     <span class="daemon-info" id="daemon-info">—</span>
   </div>
@@ -1481,6 +1633,42 @@
   poll();
   setInterval(poll, TIMINGS.pollIntervalMs);
 })();
+</script>
+<script>
+  // Theme cycle handler. Mirrors the algorithm in data/theme.mjs (which is
+  // exercised by data/theme.test.mjs). Inlined here because Chromium blocks
+  // ES module imports from file:// origins; the daemon serves /sessions and
+  // /session-groups but the HTML itself is opened directly from disk.
+  (() => {
+    const ORDER = ["current", "dark", "light"];
+    const GLYPH = { current: "◐", dark: "☾", light: "☀" };
+    const LABEL = { current: "Current", dark: "Dark", light: "Light" };
+    const KEY = "sessions-dashboard-theme";
+
+    const btn = document.getElementById("theme-toggle");
+
+    function applyTheme(choice, persist) {
+      document.documentElement.setAttribute("data-theme", choice);
+      document.documentElement.setAttribute("data-theme-choice", choice);
+      btn.textContent = GLYPH[choice];
+      btn.title = `Theme: ${LABEL[choice]} (click to cycle)`;
+      btn.setAttribute("aria-label", `Theme: ${LABEL[choice]}. Click to cycle theme.`);
+      // Only write on explicit user choice — initial-load defaulting must NOT
+      // pollute localStorage, otherwise future versions can't change the default.
+      if (persist) {
+        try { localStorage.setItem(KEY, choice); } catch (_) {}
+      }
+    }
+
+    btn.addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme-choice") || "current";
+      const i = ORDER.indexOf(cur);
+      const next = i === -1 ? "dark" : ORDER[(i + 1) % ORDER.length];
+      applyTheme(next, true);
+    });
+
+    applyTheme(document.documentElement.getAttribute("data-theme-choice") || "current", false);
+  })();
 </script>
 </body>
 </html>
