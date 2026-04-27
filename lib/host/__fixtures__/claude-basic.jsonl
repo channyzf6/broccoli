@@ -1,0 +1,7 @@
+{"type":"user","timestamp":"2026-04-27T15:30:00.000Z","message":{"content":"hello claude"}}
+{"type":"assistant","timestamp":"2026-04-27T15:30:01.000Z","message":{"content":[{"type":"tool_use","name":"Read","id":"t1","input":{}}],"stop_reason":"tool_use"}}
+{"type":"user","timestamp":"2026-04-27T15:30:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"assistant","timestamp":"2026-04-27T15:30:03.000Z","message":{"content":[{"type":"tool_use","name":"Grep","id":"t2","input":{}}],"stop_reason":"tool_use"}}
+{"type":"user","timestamp":"2026-04-27T15:30:04.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]}}
+{"type":"user","timestamp":"2026-04-27T15:30:05.000Z","isMeta":true,"message":{"content":"<system-reminder>synthetic</system-reminder>"}}
+{"type":"assistant","timestamp":"2026-04-27T15:30:06.000Z","message":{"content":[{"type":"text","text":"all done"}]}}
