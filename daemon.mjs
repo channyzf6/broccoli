@@ -8,6 +8,7 @@ import path from "node:path";
 import url from "node:url";
 import { chromium } from "playwright";
 import { focusSession } from "./lib/focus.mjs";
+import { isValidTerminalPaneId } from "./lib/terminal.mjs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -359,7 +360,7 @@ async function saveSessionGroups(data) {
 // 5 s, and unregister on shutdown. Any session without a heartbeat in the last
 // 15 s is expired. Dashboards poll /sessions to render the connected list.
 // -----------------------------------------------------------------------------
-const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls}
+const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls, terminal, terminalPaneId}
 const SESSION_TTL_MS = 15000;
 
 function expireSessions() {
@@ -379,6 +380,8 @@ function listSessions() {
     sessionName: s.sessionName ?? null,
     host: s.host ?? "claude",
     gitBranch: s.gitBranch ?? null,
+    terminal: s.terminal ?? null,
+    terminalPaneId: s.terminalPaneId ?? null,
     clientInfo: s.clientInfo ?? null,
     startedAt: s.startedAt,
     lastSeen: s.lastSeen,
@@ -556,13 +559,22 @@ const server = http.createServer(async (req, res) => {
       const body = parseBody(await readBody(req), res);
       if (body === null) return;
       if (!requireSessionId(body, res)) return;
-      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch } = body;
+      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch, terminal, terminalPaneId } = body;
       // Cap total registered sessions so a local process can't balloon the
       // Map via register-with-random-UUID in a tight loop. Re-registering a
       // known id is always allowed (it's an idempotent upsert).
       if (!sessions.has(sessionId) && sessions.size >= MAX_SESSIONS) {
         res.writeHead(429, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: `session cap reached (${MAX_SESSIONS})` }));
+        return;
+      }
+      // Defense in depth: terminalPaneId is interpolated into a wezterm
+      // CLI argv. The proxy validates its own env at the source, but we
+      // re-check at the boundary in case a different client speaks our
+      // /session/register endpoint directly.
+      if (!isValidTerminalPaneId(terminalPaneId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "terminalPaneId must be a non-negative integer string" }));
         return;
       }
       // Preserve any previously-set sessionName, toolCalls, lastCallAt, and
@@ -582,6 +594,12 @@ const server = http.createServer(async (req, res) => {
         // Current git branch / short-sha / null. Proxies from older clients
         // don't send it — fall back to prev so a re-register doesn't wipe it.
         gitBranch: gitBranch !== undefined ? gitBranch : (prev?.gitBranch ?? null),
+        // Host terminal info comes from the proxy's own env at register
+        // time. Same explicit-undefined idiom as gitBranch: a current
+        // proxy that sends `terminal: null` overwrites, but a stale
+        // proxy that omits the field preserves the prior value.
+        terminal: terminal !== undefined ? (terminal ?? null) : (prev?.terminal ?? null),
+        terminalPaneId: terminalPaneId !== undefined ? (terminalPaneId ?? null) : (prev?.terminalPaneId ?? null),
         startedAt: sStarted ?? new Date().toISOString(),
         lastSeen: Date.now(),
         toolCalls: prev?.toolCalls ?? 0,
