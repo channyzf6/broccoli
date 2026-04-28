@@ -88,17 +88,21 @@ Windows Terminal's `WT_SESSION`).
 ┌──────────────────────────────────────────────────────────────────┐
 │ Daemon (daemon.mjs)                                              │
 │                                                                  │
-│  /session/register: stores terminal + terminalPaneId on the      │
-│  session record (preserves across re-registers, like host).      │
+│  /session/register: validates terminalPaneId shape, stores       │
+│  terminal + terminalPaneId on the session record using the       │
+│  gitBranch-style preserve pattern.                               │
 │                                                                  │
 │  /sessions: projects terminal + terminalPaneId per session.      │
 │                                                                  │
-│  capabilities.focus is true on darwin OR win32. The dashboard    │
-│  decides per-session.                                            │
+│  capabilities = {                                                │
+│    focus: darwin,                       # macOS catch-all        │
+│    focusTerminals: win32 ? ["wezterm"] : [],                     │
+│  }                                                               │
 │                                                                  │
 │  /session/focus: dispatches by process.platform:                 │
-│    darwin → lib/focus.mjs (unchanged)                            │
+│    darwin → lib/focus.mjs (small kind-field follow-on)           │
 │    win32  → lib/focus-windows.mjs (new)                          │
+│  Status mapped from result.kind, not regex.                      │
 └──────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -106,15 +110,16 @@ Windows Terminal's `WT_SESSION`).
 │ lib/focus-windows.mjs                                            │
 │                                                                  │
 │  focusSession({ pid, terminal, terminalPaneId }):                │
-│    if terminal !== "wezterm" → 501-style "not supported" error   │
-│    if !terminalPaneId        → 500-style "pane id missing"       │
+│    returns { ok, strategy?, error?, kind?, partial? }            │
 │                                                                  │
-│    1. Resolve wezterm.exe (PATH first, then WEZTERM_EXECUTABLE   │
-│       sibling).                                                  │
+│    if terminal !== "wezterm" → kind:"unsupported"                │
+│    if terminalPaneId missing/malformed → kind:"runtime"          │
+│                                                                  │
+│    1. Resolve wezterm.exe (PATH first, then a few common         │
+│       install dirs as fallback).                                 │
 │    2. Run: wezterm cli activate-pane --pane-id <id>              │
-│    3. Find a wezterm-gui.exe pid + HWND, raise it via Win32      │
-│       AttachThreadInput + SetForegroundWindow (PowerShell        │
-│       helper).                                                   │
+│    3. Find wezterm-gui.exe pid + HWND, raise via PowerShell      │
+│       (AppActivate first, AttachThreadInput fallback).           │
 │    4. Return { ok: true, strategy: "wezterm" }                   │
 └──────────────────────────────────────────────────────────────────┘
                                │
@@ -124,9 +129,9 @@ Windows Terminal's `WT_SESSION`).
 │                                                                  │
 │  Per-card focus button gate:                                     │
 │    const focusable =                                             │
-│      caps.focus &&                                               │
-│      (daemon.platform === "darwin" || s.terminal === "wezterm"); │
-│  Add s.terminal to cardSignature() so re-detect rebuilds card.   │
+│      caps?.focus ||                                              │
+│      caps?.focusTerminals?.includes(s.terminal);                 │
+│  Add s.terminal + caps signature to cardSignature.               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -159,26 +164,28 @@ Why proxy-side (not daemon-side):
 ### Daemon: storage and dispatch (`daemon.mjs`)
 
 1. **Register handler** (line ~559): destructure `terminal`,
-   `terminalPaneId` from body. Store on the session record with the
-   same "preserve across re-registers via `prev?.field`" pattern used
-   for `host` and `gitBranch`. (A re-register with `terminal=null`
-   from an older proxy must not wipe a previously-detected terminal.)
+   `terminalPaneId` from body. Store on the session record using the
+   `gitBranch` preserve pattern (`field !== undefined ? field : (prev?.field ?? null)`),
+   NOT the `host` pattern (`field ?? prev?.field`). The distinction
+   matters: a current proxy that explicitly sends `terminal: null`
+   should overwrite, but a stale proxy that omits the field entirely
+   should preserve. See `daemon.mjs:584` for the gitBranch idiom to
+   copy.
 
 2. **listSessions** (line ~372): project both fields.
 
-3. **Capabilities** (line ~400): change to
-   `{ focus: process.platform === "darwin" || process.platform === "win32" }`.
-   Add `platform: process.platform` to the daemon block in the
-   `/sessions` response so the dashboard can gate per platform.
+3. **Capabilities** (line ~400): keep `focus: process.platform === "darwin"` semantics for "the daemon supports the macOS catch-all," and ADD `focusTerminals: process.platform === "win32" ? ["wezterm"] : []`. The dashboard gates per-card on `caps.focus || caps.focusTerminals?.includes(s.terminal)`. This avoids surfacing `process.platform` on the wire and matches the structure the future-work section anticipates (per-terminal pluggability).
 
 4. **Focus handler** (line ~642): replace the static
    `import { focusSession } from "./lib/focus.mjs"` with a
    platform-conditional dispatch. Pass the full session record (not
    just `{ pid }`).
 
-5. **Status code mapping**: extend the regex on line ~657 with a
-   "wezterm not on PATH" / "session not in WezTerm" pattern → 501
-   (capability gap) vs 500 (runtime failure).
+5. **Status code mapping**: replace the existing regex match on line ~657 with a structured-result switch. Both `lib/focus.mjs` and `lib/focus-windows.mjs` return `{ ok, error, kind: "unsupported" | "runtime" | "timeout" }`; daemon maps `unsupported → 501`, `timeout/runtime → 500`. This entrenches less string-matching brittleness than mirroring the regex across two files. Small follow-on edit to `lib/focus.mjs` to thread the `kind` field through its existing return shapes.
+
+6. **Register-boundary validation**: at `/session/register`, reject payloads where `terminalPaneId` is non-null and not `/^\d+$/`. The proxy is generally trusted, but defense-in-depth — same posture the focus-handler regex enforces today.
+
+7. **`terminal` re-register preservation**: use the `gitBranch` pattern (`terminal !== undefined ? terminal : (prev?.terminal ?? null)`), NOT the `host` pattern (`host ?? prev?.host`). The difference matters: a current proxy that has *intentionally* dropped its terminal binding (e.g., the user kicked claude into a different shell mid-session — unlikely but representable) should overwrite to `null`. Stale proxies that don't send the field at all preserve.
 
 ### `lib/focus-windows.mjs` (new)
 
@@ -201,12 +208,17 @@ Internal helpers:
 - `activatePane(weztermPath, paneId)` — spawn `wezterm cli activate-pane --pane-id <n>`. Strict integer validation on paneId before spawn.
 - `findWezTermHwnd()` — runs PowerShell:
   `Get-Process wezterm-gui -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 -ExpandProperty MainWindowHandle`. Returns HWND as an integer string, or null.
-- `raiseWindow(hwnd)` — runs an embedded PowerShell that uses
-  `Add-Type` to define a tiny C# class with `AttachThreadInput` +
-  `ShowWindowAsync(SW_RESTORE)` + `SetForegroundWindow`. Best-effort:
-  swallow failures, return ok regardless of whether the foreground
-  steal succeeded (taskbar flash is acceptable degradation on
-  locked-down Win11).
+- `raiseWindow(hwnd, weztermPid)` — best-effort sequence:
+  1. Try `(New-Object -ComObject WScript.Shell).AppActivate($pid)`
+     first. One PowerShell line, no Add-Type, no JIT, uses a
+     documented foreground-relinquish path. Works against many Win11
+     22H2+ builds where AttachThreadInput fails.
+  2. Fall back to `Add-Type` C# helper using `AttachThreadInput` +
+     `ShowWindowAsync(SW_RESTORE)` + `SetForegroundWindow` if
+     AppActivate's return is `$false`.
+  3. Either way, return `ok: true` — taskbar flash is acceptable
+     degradation. The per-call cost is one PowerShell process; we
+     pay the cold-start once.
 
 Subprocess discipline (mirrors `lib/focus.mjs`):
 - Use `spawn` with argv arrays. Never shell strings.
@@ -223,23 +235,23 @@ inside `lib/focus.mjs`.
 1. **Capability gate** (line 1111): change
    `if (daemonState?.capabilities?.focus)` to:
    ```js
+   const caps = daemonState?.capabilities;
    const focusable =
-     daemonState?.capabilities?.focus &&
-     (daemonState?.platform === "darwin" || s.terminal === "wezterm");
+     caps?.focus ||                                    // darwin catch-all
+     caps?.focusTerminals?.includes(s.terminal);       // win32 per-terminal
    if (focusable) { /* render button */ }
    ```
-   (`daemonState` is `sData.daemon` per `data/sessions.html:1569`, so
-   `daemonState?.platform` reads the new field directly. macOS keeps
-   the existing "all sessions" behavior for backwards compat;
-   per-session detection is Windows-only in v1.)
+   The two-axis check from the earlier draft is replaced by a single
+   union — cleaner and the wire shape is symmetric across platforms.
 
 2. **cardSignature** (line ~1322): add `s.terminal` to the per-card
    tuple AND extend the daemon-state portion (`cSig`, line ~1329) to
-   include `daemonState?.platform`. Without the per-card field, a
-   session that re-registers with a new `terminal` value won't rebuild
-   to add/remove the button. Without the platform field on the daemon
-   sig, swapping a Windows daemon ↔ macOS daemon (e.g., remote-port
-   forwarding scenario) won't trigger the bulk rebuild.
+   include `caps.focus` plus `JSON.stringify(caps.focusTerminals)`.
+   Without the per-card field, a session that re-registers with a new
+   `terminal` value won't rebuild to add/remove the button. Without
+   the focusTerminals capture in the daemon sig, swapping a Windows
+   daemon ↔ macOS daemon (port-forwarding scenario) won't trigger the
+   bulk rebuild.
 
 3. **Tooltip**: extend the focus button title to read
    `"Focus this session's terminal tab"` already says enough; no
@@ -252,18 +264,29 @@ inside `lib/focus.mjs`.
 Pure-logic tests (no real WezTerm or Win32 calls):
 
 1. `focusSession returns clear error when terminal !== "wezterm"` —
-   covers cmd / pwsh / git-bash sessions.
+   kind: "unsupported". Covers cmd / pwsh / git-bash sessions.
 2. `focusSession returns clear error when terminalPaneId is missing` —
-   covers a malformed register payload.
+   kind: "runtime". Covers a malformed register payload.
 3. `focusSession rejects non-numeric terminalPaneId` — security: ensure
    `--pane-id "; rm -rf /"` is impossible. Argv-based spawn means it
    cannot become a shell injection, but we still want strict shape
    validation upstream.
 4. `focusSession returns "wezterm CLI not found" when resolver returns null`
-   — the resolver is mocked to return null. No real spawn.
-5. `focusSession success path` — resolver returns a path, the
+   — kind: "unsupported". Resolver mocked to return null; no real spawn.
+5. `focusSession returns runtime error when activate-pane fails (pane gone)`
+   — stub the spawn to exit non-zero with a "pane not found" stderr;
+   verify the stderr is surfaced in the returned error and kind is
+   "runtime". Covers the pane-closed-but-session-registered case.
+6. `focusSession success path` — resolver returns a path, the
    `activatePane` and `raiseWindow` helpers are stubbed to succeed,
    and the function returns `{ ok: true, strategy: "wezterm" }`.
+
+Plus a small daemon-side test file or extension if convenient:
+
+7. `daemon /session/register rejects non-numeric terminalPaneId` —
+   defense-in-depth check at the boundary. (Either as a new
+   `daemon.test.mjs` or as a focused unit test on the validation
+   helper if one's extracted.)
 
 The harness uses `node --test`, matching the existing
 `lib/host/*.test.mjs` style. To make `npm test` pick up the new file,
@@ -279,12 +302,15 @@ in this PR. Mention in PR description.)
 Two changes:
 
 1. **`scripts.test`**: change from `node --test lib/host/` to
-   `node --test lib/host/ lib/`. Picks up the new `lib/focus-windows.test.mjs`
-   without re-globbing the host directory.
-2. **`files`**: add `"!lib/*.test.mjs"` to the exclude list.
-   `lib/host/*.test.mjs` is already excluded; without an analogous rule
-   for `lib/`, the new `lib/focus-windows.test.mjs` would ship in the npm
-   artifact.
+   `node --test lib/host/ lib/ data/`. Picks up the new
+   `lib/focus-windows.test.mjs`, AND fixes a pre-existing gap:
+   `data/theme.test.mjs` isn't currently in the script. Both come for
+   free with the new globs.
+2. **`files`**: add `"!lib/**/*.test.mjs"` to the exclude list (NOT
+   `"!lib/*.test.mjs"` — the deeper glob keeps any future
+   `lib/<subdir>/<x>.test.mjs` out of the artifact too).
+   `lib/host/*.test.mjs` already excluded; the new rule subsumes it
+   but leaving both is harmless.
 
 ### Documentation
 
@@ -314,12 +340,20 @@ Two changes:
 
 | Condition | Returned shape | HTTP |
 |---|---|---|
-| `terminal === null` | `{ ok: false, error: "session not running inside a supported terminal", pid }` | 501 |
-| `terminal === "wezterm"`, `terminalPaneId` missing | `{ ok: false, error: "wezterm session has no pane id (proxy too old?)", pid }` | 500 |
-| `wezterm.exe` not found | `{ ok: false, error: "wezterm CLI not found on PATH", pid }` | 501 |
-| `wezterm cli activate-pane` fails (mux server gone, pane closed) | `{ ok: false, error: "wezterm activate-pane failed: <stderr>", pid }` | 500 |
-| `wezterm cli` succeeds but window-raise PowerShell fails | `{ ok: true, strategy: "wezterm", partial: "pane activated; window raise failed" }` | 200 |
-| Spawn timeout | `{ ok: false, error: "wezterm cli timed out", pid, timedOut: true }` | 500 |
+| `terminal === null` | `{ ok: false, error: "...", kind: "unsupported", pid }` | 501 |
+| `terminal === "wezterm"`, `terminalPaneId` missing | `{ ok: false, error: "...", kind: "runtime", pid }` | 500 |
+| `wezterm.exe` not found | `{ ok: false, error: "wezterm CLI not found on PATH", kind: "unsupported", pid }` | 501 |
+| `wezterm cli activate-pane` fails (mux gone, pane closed) | `{ ok: false, error: "wezterm activate-pane failed: <stderr>", kind: "runtime", pid }` | 500 |
+| `wezterm cli` succeeds, window-raise PowerShell fails | `{ ok: true, strategy: "wezterm", partial: "pane activated; window raise failed" }` | 200 |
+| Spawn timeout | `{ ok: false, error: "...", kind: "timeout", pid, timedOut: true }` | 500 |
+
+The daemon's status mapping switches on `kind`:
+- `unsupported` → 501
+- `runtime` / `timeout` → 500
+- `ok: true` → 200
+
+Same scheme is back-applied to `lib/focus.mjs` so both platforms emit
+structured kinds — no regex match on error strings.
 
 The dashboard's existing `showToast("Focus: " + msg, "warn")` already
 formats these for the user.
@@ -338,35 +372,50 @@ Same posture as macOS path:
 
 ## Window-raise implementation detail
 
-The `AttachThreadInput` trick (template — `<HWND>` is replaced
-at runtime with the integer HWND from `findWezTermHwnd()`):
+Two-attempt strategy in a single PowerShell invocation. The script is
+built from a static template; `<HWND>` and `<PID>` are replaced at
+runtime with integers (validated upstream).
 
 ```powershell
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class W {
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int n);
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
-  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-}
+# Attempt 1: WScript.Shell.AppActivate by pid. Documented and works
+# against many Win11 22H2+ profiles.
+$ok = (New-Object -ComObject WScript.Shell).AppActivate(<PID>)
+if (-not $ok) {
+  # Attempt 2: AttachThreadInput dance.
+  Add-Type @"
+  using System;
+  using System.Runtime.InteropServices;
+  public class W {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int n);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  }
 "@
-$h = [IntPtr]<HWND>
-$fg = [W]::GetForegroundWindow()
-$me = [W]::GetCurrentThreadId()
-[W]::GetWindowThreadProcessId($fg, [ref]$null) | Out-Null
-$fgT = [W]::GetWindowThreadProcessId($fg, [ref]$null)
-[W]::AttachThreadInput($me, $fgT, $true) | Out-Null
-[W]::ShowWindowAsync($h, 9) | Out-Null  # SW_RESTORE
-[W]::SetForegroundWindow($h) | Out-Null
-[W]::AttachThreadInput($me, $fgT, $false) | Out-Null
+  $h    = [IntPtr]::new([int64]<HWND>)
+  $fg   = [W]::GetForegroundWindow()
+  $fgPid = 0   # NOT $pid — that's a read-only automatic in PowerShell
+  $fgT  = [W]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+  $me  = [W]::GetCurrentThreadId()
+  [W]::AttachThreadInput($me, $fgT, $true) | Out-Null
+  [W]::ShowWindowAsync($h, 9) | Out-Null   # SW_RESTORE
+  [W]::SetForegroundWindow($h) | Out-Null
+  [W]::AttachThreadInput($me, $fgT, $false) | Out-Null
+}
 ```
 
 PowerShell cold-start is 200-500ms. Acceptable for a click-driven
-action with existing 300ms button-press feedback animation.
+action with the existing 300ms button-press feedback animation.
+
+Notes on the snippet shape:
+- `[IntPtr]::new([int64]...)` is used instead of `[IntPtr]<n>` so the
+  cast is safe across the full HWND range on 64-bit Windows
+  (raw-int casts assume Int32 and overflow on large handles).
+- We don't read the success boolean of `SetForegroundWindow`. On the
+  strictest profiles it returns false and the user gets a taskbar
+  flash; that's the documented degradation.
 
 ## Future work (intentionally not in this PR)
 
