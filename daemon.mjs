@@ -7,7 +7,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
 import { chromium } from "playwright";
-import { focusSession } from "./lib/focus.mjs";
+import { focusSession as focusDarwin } from "./lib/focus.mjs";
+import { focusSession as focusWindows } from "./lib/focus-windows.mjs";
 import { isValidTerminalPaneId } from "./lib/terminal.mjs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -658,9 +659,11 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, removed: existed }));
       return;
     }
-    // Focus a session's terminal tab (macOS only — see lib/focus.mjs).
-    // The body's sessionId must correspond to an entry in our own registry;
-    // we never take a pid from the HTTP body.
+    // Focus a session's terminal tab. Dispatched by platform:
+    //   darwin → lib/focus.mjs (AppleScript-driven tty walk)
+    //   win32  → lib/focus-windows.mjs (WezTerm CLI + window raise)
+    // The body's sessionId must correspond to an entry in our own
+    // registry; we never take a pid from the HTTP body.
     if (req.method === "POST" && req.url === "/session/focus") {
       const body = parseBody(await readBody(req), res);
       if (body === null) return;
@@ -671,13 +674,14 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: "no such session", sessionId: body.sessionId }));
         return;
       }
-      const result = await focusSession({ pid: s.pid });
-      // 501 for platform/terminal unsupported, 200 for success, 500 for
-      // concrete runtime failures (osascript died, session pid gone, etc.).
-      const errMsg = result.error || "";
-      const status = result.ok ? 200 : (
-        /implemented on macOS|not supported for|invalid session pid/.test(errMsg) ? 501 : 500
-      );
+      const result = process.platform === "darwin"
+        ? await focusDarwin(s)
+        : process.platform === "win32"
+        ? await focusWindows(s)
+        : { ok: false, error: "focus not implemented on platform '" + process.platform + "'", kind: "unsupported", pid: s.pid };
+      // result.kind discriminates: 'unsupported' -> 501 (capability gap);
+      // 'runtime'/'timeout' -> 500 (concrete failure). 200 on success.
+      const status = result.ok ? 200 : (result.kind === "unsupported" ? 501 : 500);
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
       return;
