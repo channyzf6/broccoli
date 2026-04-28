@@ -361,7 +361,7 @@ async function saveSessionGroups(data) {
 // 5 s, and unregister on shutdown. Any session without a heartbeat in the last
 // 15 s is expired. Dashboards poll /sessions to render the connected list.
 // -----------------------------------------------------------------------------
-const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls, terminal, terminalPaneId}
+const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls, terminal, terminalPaneId, terminalSocket}
 const SESSION_TTL_MS = 15000;
 
 function expireSessions() {
@@ -383,6 +383,7 @@ function listSessions() {
     gitBranch: s.gitBranch ?? null,
     terminal: s.terminal ?? null,
     terminalPaneId: s.terminalPaneId ?? null,
+    terminalSocket: s.terminalSocket ?? null,
     clientInfo: s.clientInfo ?? null,
     startedAt: s.startedAt,
     lastSeen: s.lastSeen,
@@ -564,7 +565,7 @@ const server = http.createServer(async (req, res) => {
       const body = parseBody(await readBody(req), res);
       if (body === null) return;
       if (!requireSessionId(body, res)) return;
-      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch, terminal, terminalPaneId } = body;
+      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch, terminal, terminalPaneId, terminalSocket } = body;
       // Cap total registered sessions so a local process can't balloon the
       // Map via register-with-random-UUID in a tight loop. Re-registering a
       // known id is always allowed (it's an idempotent upsert).
@@ -580,6 +581,15 @@ const server = http.createServer(async (req, res) => {
       if (!isValidTerminalPaneId(terminalPaneId)) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "terminalPaneId must be a non-negative integer string" }));
+        return;
+      }
+      // terminalSocket is passed as an env var (never argv), so shell
+      // injection isn't reachable. Just sanity-cap the length and
+      // require it be a string — anything weirder than a path is the
+      // proxy's bug, not ours to interpret.
+      if (terminalSocket != null && (typeof terminalSocket !== "string" || terminalSocket.length > 1024)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "terminalSocket must be a string (<=1024 chars)" }));
         return;
       }
       // Preserve any previously-set sessionName, toolCalls, lastCallAt, and
@@ -605,6 +615,7 @@ const server = http.createServer(async (req, res) => {
         // proxy that omits the field preserves the prior value.
         terminal: terminal !== undefined ? (terminal ?? null) : (prev?.terminal ?? null),
         terminalPaneId: terminalPaneId !== undefined ? (terminalPaneId ?? null) : (prev?.terminalPaneId ?? null),
+        terminalSocket: terminalSocket !== undefined ? (terminalSocket ?? null) : (prev?.terminalSocket ?? null),
         startedAt: sStarted ?? new Date().toISOString(),
         lastSeen: Date.now(),
         toolCalls: prev?.toolCalls ?? 0,
