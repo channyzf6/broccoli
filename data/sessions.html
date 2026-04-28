@@ -160,7 +160,9 @@
                 var(--bg);
     min-height: 100vh;
   }
-  header { position: relative; padding: 1.8rem 2rem 1rem; border-bottom: 1px solid var(--border); }
+  /* padding-right reserves room for the absolutely-positioned theme toggle
+     so the H1 + subtitle can never run under the button at narrow widths. */
+  header { position: relative; padding: 1.8rem 4rem 1rem 2rem; border-bottom: 1px solid var(--border); }
   h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.02em; }
   h1 .sub { color: var(--dim); font-weight: 400; font-size: .95rem; margin-left: .6rem; }
 
@@ -276,7 +278,15 @@
     gap: 1rem; list-style: none; margin: 0;
     transition: background .15s ease, border-color .15s ease;
   }
-  .group-drop.empty { border-color: var(--border); color: var(--dim); font-style: italic; align-items: center; justify-content: center; display: flex; padding: 1rem; }
+  /* Compact empty placeholder: small padding + smaller font so unfilled
+     groups don't visually compete with real session cards. Border stays
+     transparent at rest (drag-over state still highlights via .drag-over). */
+  .group-drop.empty {
+    border-color: transparent; color: var(--dim); font-style: italic;
+    font-size: .72rem; opacity: .65;
+    align-items: center; justify-content: center; display: flex;
+    padding: .35rem; min-height: 28px;
+  }
   .group-drop.drag-over { background: var(--blue-tint); border-color: var(--blue-border-hi); border-style: dashed; }
   /* Smaller ghost button, right-aligned; no longer competing with
      drop-zone placeholders for visual weight. */
@@ -390,16 +400,25 @@
 
   /* Status pill: the card's only color accent. flex-shrink:0 keeps it
      whole at the right edge; align-items:center on .session vertically
-     centers it between row 1 and row 2. */
+     centers it between row 1 and row 2. max-width caps the pill so a long
+     tool name (e.g. "running sessions-dashboard·eval_js..") can't push the
+     locator into ellipsis territory — the inner .label ellipsizes within
+     the cap so the truncation happens inside the pill, not at the locator. */
   .session .status {
     flex-shrink: 0;
+    max-width: 50%; overflow: hidden;
     font-size: .72rem; font-weight: 600;
     padding: .2rem .65rem; border-radius: 999px; white-space: nowrap;
     display: inline-flex; align-items: center; gap: .4rem;
     font-family: ui-sans-serif, system-ui, sans-serif;
   }
   .session .status .dot {
+    flex-shrink: 0;
     width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+  }
+  .session .status .label {
+    min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* "running <tool>.." — tool is dispatched, session is waiting on the tool.
      Violet conveys "agent is parked until the tool returns". */
@@ -488,7 +507,10 @@
   .toast.toast-warn { border-color: var(--toast-warn-border); color: var(--gold); }
 
   /* Theme toggle: single cycling button, top-right of the header.
-     Glyph reflects the current mode; click cycles current → dark → light. */
+     Glyph reflects the current mode; click cycles current → dark → light.
+     position: absolute (not fixed) so it stays anchored to the header and
+     scrolls away with it — keeping the dashboard chrome out of the way
+     while the user is reading session cards. */
   .theme-toggle {
     position: absolute; top: 1.4rem; right: 1.4rem; z-index: 1;
     background: var(--panel-hi); color: var(--text);
@@ -502,6 +524,25 @@
     background: var(--blue-tint); border-color: var(--blue-border-hi);
   }
   .theme-toggle:focus-visible {
+    outline: 2px solid var(--blue-focus-ring); outline-offset: 2px;
+  }
+
+  /* Help affordance: small `?` chip in the status row. Holds the drag-and-drop
+     onboarding hint that used to live in the footer — discoverable on hover
+     without spending permanent screen real estate on tutorial text. */
+  .help-btn {
+    flex-shrink: 0;
+    background: var(--panel-hi); color: var(--dim);
+    border: 1px solid var(--border); border-radius: 999px;
+    width: 22px; height: 22px; padding: 0;
+    font-size: .78rem; line-height: 1; cursor: help;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .help-btn:hover {
+    color: var(--text); border-color: var(--blue-border-hi); background: var(--blue-tint);
+  }
+  .help-btn:focus-visible {
     outline: 2px solid var(--blue-focus-ring); outline-offset: 2px;
   }
 </style>
@@ -518,13 +559,16 @@
     <span class="status-dot" id="daemon-dot"></span>
     <span class="count" id="sessions-count">—</span>
     <span class="daemon-info" id="daemon-info">—</span>
+    <button id="help-btn" type="button" class="help-btn"
+            title="Drag session cards between groups to organize them; groups persist across daemon restarts."
+            aria-label="Help: Drag session cards between groups to organize them; groups persist across daemon restarts.">?</button>
   </div>
   <div id="groups-container"></div>
   <div id="new-group-wrap" class="new-group-btn-wrap">
     <button id="new-group-btn" class="new-group-btn" type="button">+ New group</button>
   </div>
 </main>
-<footer>Polls <code>http://127.0.0.1:8787/sessions</code> every 2 s. Drag session cards between groups to organize them; groups persist across daemon restarts.</footer>
+<footer>Polls <code>http://127.0.0.1:8787/sessions</code> every 2 s.</footer>
 
 <script>
 (() => {
@@ -798,7 +842,7 @@
     const pill = document.createElement("span");
     pill.className = "status " + kind;
     const dot = document.createElement("span"); dot.className = "dot";
-    const txt = document.createElement("span"); txt.textContent = label;
+    const txt = document.createElement("span"); txt.className = "label"; txt.textContent = label;
     pill.append(dot, txt);
     return pill;
   }
@@ -1418,9 +1462,9 @@
       state.className = "empty-state";
       const icon = document.createElement("div"); icon.className = "icon"; icon.textContent = "◇";
       const h = document.createElement("h2");
-      h.textContent = "No Claude Code sessions connected";
+      h.textContent = "No agentic CLI sessions connected";
       const p = document.createElement("p");
-      p.innerHTML = 'Launch <code>claude</code> from any project and its session will appear here within a few seconds. You can organize sessions into workstreams once they arrive.';
+      p.innerHTML = 'Launch <code>claude</code>, <code>codex</code>, or <code>gemini</code> from any project and its session will appear here within a few seconds. You can organize sessions into workstreams once they arrive.';
       state.append(icon, h, p);
       groupsContainer.append(state);
       newGroupWrap.style.display = "none";

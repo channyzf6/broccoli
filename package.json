@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "start": "node bin/sessions-dashboard.mjs",
-    "test": "node --test lib/host/",
+    "test": "node --test \"lib/host/*.test.mjs\" \"data/*.test.mjs\"",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
