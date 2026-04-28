@@ -16,6 +16,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { detectHost, makeAdapter } from "./lib/host/registry.mjs";
 import { resolveGitDir, readHead } from "./lib/git.mjs";
+import { detectHostTerminal } from "./lib/terminal.mjs";
 
 const PORT = parseInt(process.env.SESSIONS_DASHBOARD_PORT || "8787", 10);
 // By default the daemon is dormant until a tool is invoked. Set
@@ -215,6 +216,7 @@ async function registerSession() {
       sessionName: SESSION_NAME,
       host: SESSION_HOST,
       gitBranch: SESSION_GIT_BRANCH,
+      ...detectHostTerminal(),
     });
     if (status === 429) {
       // Daemon's session cap is full. Without this log the session would be

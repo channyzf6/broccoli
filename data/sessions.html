@@ -1149,10 +1149,16 @@
     }
 
     li.append(body);
-    // Focus-terminal button — only when the daemon advertises the capability
-    // (macOS only). Icon-only; sits between the body and the status pill so
-    // it's visually balanced and vertically centered by .session's flex.
-    if (daemonState?.capabilities?.focus) {
+    // Focus-terminal button. caps.focus is the macOS catch-all (any
+    // session can be targeted via tty walk). caps.focusTerminals is
+    // the per-terminal allowlist for platforms where only specific
+    // terminals are supported (Windows + WezTerm in v0.5). Hidden on
+    // cards for which neither applies. Icon-only; sits between the
+    // body and the status pill so it's vertically centered by
+    // .session's flex.
+    const caps = daemonState?.capabilities;
+    const focusable = caps?.focus || caps?.focusTerminals?.includes(s.terminal);
+    if (focusable) {
       const focusBtn = document.createElement("button");
       focusBtn.type = "button";
       focusBtn.className = "focus-btn";
@@ -1354,7 +1360,7 @@
     // inside cwd/name/etc. (e.g. "C:\foo|bar") can't collide and produce a
     // false-equal signature that skips a needed re-render.
     const sSig = sessionsState
-      .map((s) => [s.id, s.sessionName || "", s.cwd || ""])
+      .map((s) => [s.id, s.sessionName || "", s.cwd || "", s.terminal || ""])
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     const gSig = groupsState.map((g) => [
       g.id, g.name, g.color || "",
@@ -1366,11 +1372,15 @@
     const pSig = pinsState
       .map((p) => [p.sessionId, p.groupId === null ? "" : p.groupId])
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-    // Capability flags affect per-card DOM (focus button renders only when
-    // daemon.capabilities.focus is true). Include in the signature so a
-    // daemon-restart-swap transition triggers a full rebuild that
-    // adds/removes buttons rather than leaving stale ones.
-    const cSig = !!daemonState?.capabilities?.focus;
+    // Capability flags affect per-card DOM (focus button renders when
+    // caps.focus is true OR s.terminal is in caps.focusTerminals).
+    // Include the full capability shape in the signature so a
+    // daemon-restart-swap transition (e.g., port-forward to a different
+    // platform) triggers a full rebuild instead of leaving stale buttons.
+    const cSig = JSON.stringify([
+      !!daemonState?.capabilities?.focus,
+      daemonState?.capabilities?.focusTerminals || [],
+    ]);
     return JSON.stringify([sSig, gSig, pSig, cSig]);
   }
 

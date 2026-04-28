@@ -1,6 +1,6 @@
 {
   "name": "sessions-dashboard",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "A live dashboard for every Claude Code / Gemini CLI / Codex CLI session you're running. See activity in real time, organize sessions into groups, and share a browser across sessions.",
   "type": "module",
   "main": "index.mjs",
@@ -15,11 +15,11 @@
     "data/dashboards.json",
     "data/sessions.html",
     "!lib/host/__fixtures__",
-    "!lib/host/*.test.mjs"
+    "!lib/**/*.test.mjs"
   ],
   "scripts": {
     "start": "node bin/sessions-dashboard.mjs",
-    "test": "node --test \"lib/host/*.test.mjs\" \"data/*.test.mjs\"",
+    "test": "node --test",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {

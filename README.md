@@ -38,7 +38,7 @@ If you run more than one CLI agent at a time, you quickly lose track:
 - 🟣 **`running bash..`** — a tool is executing (you see which one)
 - ⚪ **`idle 2m`** — done, waiting for your next prompt
 - **Drag-and-drop groups** — organize sessions into named columns that persist across restarts
-- **One-click focus (macOS)** — jump from a card to the corresponding terminal tab, ready to prompt.
+- **One-click focus (macOS, Windows + WezTerm)** — jump from a card to the corresponding terminal tab, ready to prompt.
 - **Shared browser** — any session can open a webview every other session can script (useful for coordinated debugging)
 
 ---
@@ -81,13 +81,13 @@ Drag cards between groups in the dashboard. Groups match by **cwd** or **session
 
 Under the hood, one Chromium instance serves all sessions. Session A can open `https://example.com`; session B can call `eval_js` on that same page; session C can screenshot it. Useful for coordinated debugging flows where one agent drives and another inspects.
 
-### Focus a session's terminal (macOS only)
+### Focus a session's terminal
 
 Each session card has a small `↗` button on its right side. Click it to bring that session's terminal window to the foreground with the correct tab selected — typing lands straight in the agent's prompt (Claude / Gemini / Codex, whichever the card is). Useful when the dashboard shows something finished and you need to jump to it.
 
-Supported on macOS with Terminal.app, iTerm2, and tmux running inside either. Other terminals (WezTerm, Kitty, VS Code integrated terminal, ...) show a toast with the session's pid so you can Cmd-Tab manually. Windows and Linux daemons hide the button entirely (capability-gated).
-
-First use triggers a one-time macOS automation-permission prompt asking to let `node` control Terminal.app / iTerm2. Click Allow; subsequent clicks work without a prompt.
+- **macOS:** any session, regardless of terminal. Walks Terminal.app / iTerm2 tabs by tty, with first-class tmux support. First use triggers a one-time automation-permission prompt asking to let `node` control Terminal.app / iTerm2 — click Allow; subsequent clicks work without a prompt.
+- **Windows:** sessions running inside WezTerm only — detected via the `WEZTERM_PANE` env var. Other Windows terminals (Windows Terminal, ConEmu, cmd, pwsh, git-bash) hide the button. Uses `wezterm cli activate-pane` to switch panes and a small PowerShell helper to raise the GUI window.
+- **Linux:** not yet supported — the button is hidden.
 
 ---
 
