@@ -7,7 +7,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
 import { chromium } from "playwright";
-import { focusSession } from "./lib/focus.mjs";
+import { focusSession as focusDarwin } from "./lib/focus.mjs";
+import { focusSession as focusWindows } from "./lib/focus-windows.mjs";
+import { isValidTerminalPaneId } from "./lib/terminal.mjs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -359,7 +361,7 @@ async function saveSessionGroups(data) {
 // 5 s, and unregister on shutdown. Any session without a heartbeat in the last
 // 15 s is expired. Dashboards poll /sessions to render the connected list.
 // -----------------------------------------------------------------------------
-const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls}
+const sessions = new Map(); // sessionId -> {pid, cwd, clientInfo, startedAt, lastSeen, toolCalls, terminal, terminalPaneId, terminalSocket}
 const SESSION_TTL_MS = 15000;
 
 function expireSessions() {
@@ -379,6 +381,9 @@ function listSessions() {
     sessionName: s.sessionName ?? null,
     host: s.host ?? "claude",
     gitBranch: s.gitBranch ?? null,
+    terminal: s.terminal ?? null,
+    terminalPaneId: s.terminalPaneId ?? null,
+    terminalSocket: s.terminalSocket ?? null,
     clientInfo: s.clientInfo ?? null,
     startedAt: s.startedAt,
     lastSeen: s.lastSeen,
@@ -394,11 +399,15 @@ function listSessions() {
   }));
 }
 
-// Platform-conditional capabilities. The focus endpoint only actually works
-// on macOS (AppleScript-driven). Advertising this lets the frontend hide
-// UI it can't usefully offer on Windows / Linux daemons.
+// Platform-conditional capabilities. `focus` is the macOS catch-all
+// (any session can be targeted via tty walk, regardless of terminal).
+// `focusTerminals` is the per-terminal allowlist for platforms where
+// only specific terminals are supported — Windows + WezTerm in v0.5.
+// The frontend gates per-card on
+//   caps.focus || caps.focusTerminals?.includes(s.terminal).
 const DAEMON_CAPABILITIES = Object.freeze({
   focus: process.platform === "darwin",
+  focusTerminals: process.platform === "win32" ? ["wezterm"] : [],
 });
 
 async function daemon_info() {
@@ -556,13 +565,31 @@ const server = http.createServer(async (req, res) => {
       const body = parseBody(await readBody(req), res);
       if (body === null) return;
       if (!requireSessionId(body, res)) return;
-      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch } = body;
+      const { sessionId, pid, cwd, startedAt: sStarted, clientInfo, sessionName, host, gitBranch, terminal, terminalPaneId, terminalSocket } = body;
       // Cap total registered sessions so a local process can't balloon the
       // Map via register-with-random-UUID in a tight loop. Re-registering a
       // known id is always allowed (it's an idempotent upsert).
       if (!sessions.has(sessionId) && sessions.size >= MAX_SESSIONS) {
         res.writeHead(429, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: `session cap reached (${MAX_SESSIONS})` }));
+        return;
+      }
+      // Defense in depth: terminalPaneId is interpolated into a wezterm
+      // CLI argv. The proxy validates its own env at the source, but we
+      // re-check at the boundary in case a different client speaks our
+      // /session/register endpoint directly.
+      if (!isValidTerminalPaneId(terminalPaneId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "terminalPaneId must be a non-negative integer string" }));
+        return;
+      }
+      // terminalSocket is passed as an env var (never argv), so shell
+      // injection isn't reachable. Just sanity-cap the length and
+      // require it be a string — anything weirder than a path is the
+      // proxy's bug, not ours to interpret.
+      if (terminalSocket != null && (typeof terminalSocket !== "string" || terminalSocket.length > 1024)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "terminalSocket must be a string (<=1024 chars)" }));
         return;
       }
       // Preserve any previously-set sessionName, toolCalls, lastCallAt, and
@@ -582,6 +609,13 @@ const server = http.createServer(async (req, res) => {
         // Current git branch / short-sha / null. Proxies from older clients
         // don't send it — fall back to prev so a re-register doesn't wipe it.
         gitBranch: gitBranch !== undefined ? gitBranch : (prev?.gitBranch ?? null),
+        // Host terminal info comes from the proxy's own env at register
+        // time. Same explicit-undefined idiom as gitBranch: a current
+        // proxy that sends `terminal: null` overwrites, but a stale
+        // proxy that omits the field preserves the prior value.
+        terminal: terminal !== undefined ? (terminal ?? null) : (prev?.terminal ?? null),
+        terminalPaneId: terminalPaneId !== undefined ? (terminalPaneId ?? null) : (prev?.terminalPaneId ?? null),
+        terminalSocket: terminalSocket !== undefined ? (terminalSocket ?? null) : (prev?.terminalSocket ?? null),
         startedAt: sStarted ?? new Date().toISOString(),
         lastSeen: Date.now(),
         toolCalls: prev?.toolCalls ?? 0,
@@ -636,9 +670,11 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, removed: existed }));
       return;
     }
-    // Focus a session's terminal tab (macOS only — see lib/focus.mjs).
-    // The body's sessionId must correspond to an entry in our own registry;
-    // we never take a pid from the HTTP body.
+    // Focus a session's terminal tab. Dispatched by platform:
+    //   darwin → lib/focus.mjs (AppleScript-driven tty walk)
+    //   win32  → lib/focus-windows.mjs (WezTerm CLI + window raise)
+    // The body's sessionId must correspond to an entry in our own
+    // registry; we never take a pid from the HTTP body.
     if (req.method === "POST" && req.url === "/session/focus") {
       const body = parseBody(await readBody(req), res);
       if (body === null) return;
@@ -649,13 +685,14 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: "no such session", sessionId: body.sessionId }));
         return;
       }
-      const result = await focusSession({ pid: s.pid });
-      // 501 for platform/terminal unsupported, 200 for success, 500 for
-      // concrete runtime failures (osascript died, session pid gone, etc.).
-      const errMsg = result.error || "";
-      const status = result.ok ? 200 : (
-        /implemented on macOS|not supported for|invalid session pid/.test(errMsg) ? 501 : 500
-      );
+      const result = process.platform === "darwin"
+        ? await focusDarwin(s)
+        : process.platform === "win32"
+        ? await focusWindows(s)
+        : { ok: false, error: "focus not implemented on platform '" + process.platform + "'", kind: "unsupported", pid: s.pid };
+      // result.kind discriminates: 'unsupported' -> 501 (capability gap);
+      // 'runtime'/'timeout' -> 500 (concrete failure). 200 on success.
+      const status = result.ok ? 200 : (result.kind === "unsupported" ? 501 : 500);
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(result));
       return;
