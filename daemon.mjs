@@ -397,11 +397,15 @@ function listSessions() {
   }));
 }
 
-// Platform-conditional capabilities. The focus endpoint only actually works
-// on macOS (AppleScript-driven). Advertising this lets the frontend hide
-// UI it can't usefully offer on Windows / Linux daemons.
+// Platform-conditional capabilities. `focus` is the macOS catch-all
+// (any session can be targeted via tty walk, regardless of terminal).
+// `focusTerminals` is the per-terminal allowlist for platforms where
+// only specific terminals are supported — Windows + WezTerm in v0.5.
+// The frontend gates per-card on
+//   caps.focus || caps.focusTerminals?.includes(s.terminal).
 const DAEMON_CAPABILITIES = Object.freeze({
   focus: process.platform === "darwin",
+  focusTerminals: process.platform === "win32" ? ["wezterm"] : [],
 });
 
 async function daemon_info() {
