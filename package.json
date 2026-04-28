@@ -15,11 +15,11 @@
     "data/dashboards.json",
     "data/sessions.html",
     "!lib/host/__fixtures__",
-    "!lib/host/*.test.mjs"
+    "!lib/**/*.test.mjs"
   ],
   "scripts": {
     "start": "node bin/sessions-dashboard.mjs",
-    "test": "node --test lib/host/",
+    "test": "node --test",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
