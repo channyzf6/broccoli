@@ -2,7 +2,11 @@
 
 **A live dashboard for every CLI agent session you're running** — Claude Code, Gemini CLI, and Codex CLI on a single screen. See what each agent is doing in real time, organize sessions into groups, and jump straight to a session's terminal in one click.
 
-<!-- TODO: add docs/hero.gif once produced -->
+<p align="center">
+  <video src="docs/hero.mp4" autoplay loop muted playsinline width="960"></video>
+</p>
+
+![sessions-dashboard hero](docs/hero.gif)
 
 ---
 
