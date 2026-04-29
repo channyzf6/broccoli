@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "sessions-dashboard",
+  "version": "0.5.1",
+  "description": "Live browser dashboard of every Claude Code, Codex CLI, and Gemini CLI session you're running. See per-session activity in real time, organize sessions into groups that persist across restarts, and (macOS / Windows + WezTerm) jump to a session's terminal in one click.",
+  "author": {
+    "name": "Chan Park",
+    "email": "channyzf6@gmail.com"
+  },
+  "homepage": "https://github.com/channyzf6/sessions-dashboard",
+  "repository": "https://github.com/channyzf6/sessions-dashboard",
+  "license": "MIT",
+  "keywords": [
+    "dashboard",
+    "mcp",
+    "multi-agent",
+    "observability",
+    "claude-code",
+    "codex",
+    "gemini",
+    "session-management",
+    "developer-tools"
+  ],
+  "mcpServers": {
+    "sessions-dashboard": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/sessions-dashboard.mjs"],
+      "env": {
+        "SESSIONS_DASHBOARD_HOST": "claude"
+      }
+    }
+  }
+}
