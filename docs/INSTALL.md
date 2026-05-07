@@ -37,7 +37,7 @@ These shims do `npm install` (downloads Chromium) and then run `node bin/session
 
 Skip this section if you used the `npx -y sessions-dashboard install` one-liner — it auto-handles all three CLIs. This is for users hand-editing their CLI config files.
 
-All three CLIs register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI") rather than a visible glyph. Pin `SESSIONS_DASHBOARD_HOST` in each registration's env to make host detection deterministic — without it a cold-start dir-probe race can mis-route mixed-host sessions.
+All four CLIs register against the same daemon and show up side-by-side on the dashboard. The host is surfaced via the card's tooltip ("Claude Code" / "Gemini CLI" / "Codex CLI" / "GitHub Copilot CLI") rather than a visible glyph. Pin `SESSIONS_DASHBOARD_HOST` in each registration's env to make host detection deterministic — without it a cold-start dir-probe race can mis-route mixed-host sessions.
 
 ### Claude Code
 
@@ -100,6 +100,29 @@ command = "npx"
 args = ["-y", "sessions-dashboard"]
 env = { SESSIONS_DASHBOARD_AUTOSTART = "1", SESSIONS_DASHBOARD_HOST = "codex" }
 ```
+
+### GitHub Copilot CLI
+
+Copilot's `copilot mcp add` launches an interactive form rather than accepting flags non-interactively, so the simplest path is to write `~/.copilot/mcp-config.json` directly (the `npx -y sessions-dashboard install` flow does this for you):
+
+```json
+{
+  "mcpServers": {
+    "sessions-dashboard": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "sessions-dashboard"],
+      "env": {
+        "SESSIONS_DASHBOARD_HOST": "copilot",
+        "SESSIONS_DASHBOARD_AUTOSTART": "1"
+      },
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Set `COPILOT_HOME` if your config dir is somewhere other than `~/.copilot/`. Note that Copilot's MCP `env` map is literal — only `PATH` is auto-inherited — so the focus-tab feature on Windows + WezTerm is **not** supported for Copilot sessions (the dashboard hides the focus button automatically). All other features (registration, dashboard rendering, activity, manually-renamed session names) work normally.
 
 Restart your CLI after registration; tools appear as `mcp__sessions-dashboard__*`.
 

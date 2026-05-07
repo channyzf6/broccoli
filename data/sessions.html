@@ -676,9 +676,10 @@
   // `data-host` on its <li> so any future CSS rule can re-introduce a
   // visible host signal without a code change.
   function hostLabel(h) {
-    if (h === "gemini") return "Gemini CLI";
-    if (h === "codex")  return "Codex CLI";
-    if (h === "claude") return "Claude Code";
+    if (h === "gemini")  return "Gemini CLI";
+    if (h === "codex")   return "Codex CLI";
+    if (h === "claude")  return "Claude Code";
+    if (h === "copilot") return "GitHub Copilot CLI";
     return "unknown host";
   }
 
@@ -1474,7 +1475,7 @@
       const h = document.createElement("h2");
       h.textContent = "No agentic CLI sessions connected";
       const p = document.createElement("p");
-      p.innerHTML = 'Launch <code>claude</code>, <code>codex</code>, or <code>gemini</code> from any project and its session will appear here within a few seconds. You can organize sessions into workstreams once they arrive.';
+      p.innerHTML = 'Launch <code>claude</code>, <code>codex</code>, <code>gemini</code>, or <code>copilot</code> from any project and its session will appear here within a few seconds. You can organize sessions into workstreams once they arrive.';
       state.append(icon, h, p);
       groupsContainer.append(state);
       newGroupWrap.style.display = "none";

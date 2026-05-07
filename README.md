@@ -1,6 +1,6 @@
 # sessions-dashboard
 
-**A live dashboard for every CLI agent session you're running** — Claude Code, Gemini CLI, and Codex CLI on a single screen. See what each agent is doing in real time, organize sessions into groups, and jump straight to a session's terminal in one click.
+**A live dashboard for every CLI agent session you're running** — Claude Code, Gemini CLI, Codex CLI, and GitHub Copilot CLI on a single screen. See what each agent is doing in real time, organize sessions into groups, and jump straight to a session's terminal in one click.
 
 <p align="center">
   <video src="docs/hero.mp4" autoplay loop muted playsinline width="960"></video>
@@ -16,7 +16,7 @@
 npx -y sessions-dashboard install
 ```
 
-Requires Node ≥18 on PATH. The installer auto-detects which of the three CLIs are on your PATH and registers `sessions-dashboard` with each. First run pre-fetches Playwright's Chromium (~150 MB).
+Requires Node ≥18 on PATH. The installer auto-detects which of the four CLIs are on your PATH and registers `sessions-dashboard` with each. First run pre-fetches Playwright's Chromium (~150 MB).
 
 After install, restart your CLI(s) and ask any session: *"Open the sessions dashboard"*
 
@@ -74,7 +74,7 @@ The state is derived from each session's transcript (tail-state tracking against
 Sessions default to their cwd's basename. Give them nicer names three ways:
 
 - **Env var before launching:** `SESSIONS_DASHBOARD_SESSION_NAME=frontend-worker claude` (works for any host; `CLAUDE_SESSION_NAME` is a Claude-era alias)
-- **`/rename` slash command** inside the session — auto-picked up within 15 s. Supported in Claude Code and Codex CLI; **Gemini CLI has no `/rename` equivalent**, so use the env var or the `set_session_name` tool below.
+- **`/rename` slash command** inside the session — auto-picked up within 15 s. Supported in Claude Code and Codex CLI; **Gemini CLI and GitHub Copilot CLI have no `/rename` equivalent**, so use the env var or the `set_session_name` tool below. (Copilot also picks up a manually-edited `name` field in `~/.copilot/session-state/<id>/workspace.yaml` when `user_named: true`.)
 - **`set_session_name` tool** — your CLI agent can call it programmatically (works for every host)
 
 ### Group them
